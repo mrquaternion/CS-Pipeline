@@ -1,0 +1,2 @@
+[console_scripts]
+carbonpipeline = carbonpipeline.cli:main

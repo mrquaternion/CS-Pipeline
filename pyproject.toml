@@ -1,0 +1,15 @@
+[project]
+name = "carbonpipeline"
+version = "0.1.0"
+description = "A pipeline to fill missing values in CarbonSense dataset"
+readme = "README.md"
+dependencies = [
+    "cdsapi",
+    "xarray",
+    "numpy",
+    "eccodes",
+    "eccodes-python"
+]
+
+[project.scripts]
+carbonpipeline = "carbonpipeline.cli:main"
