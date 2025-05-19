@@ -1,5 +1,0 @@
-cdsapi
-xarray
-numpy
-eccodes
-eccodes-python
