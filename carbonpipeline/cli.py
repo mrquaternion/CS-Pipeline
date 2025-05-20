@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-MIN_PATTERN_SIZE = 1000
 
 def processing(file: str, lat: float, lon: float):
     """

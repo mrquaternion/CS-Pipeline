@@ -159,7 +159,7 @@ If you group columns by any shared missing timestamp (union-find), you end up wi
 
 ### UPDATE
 
-This isn't working neither. Grouping like this makes to many API calls even if we coarse to the max. Will not make sense. Will follow for now with the original approach of getting fetching for all the variables.
+This isn't working neither. Grouping like this makes too many API calls even if we coarse to the max. Will not make sense. Will follow for now with the original approach of getting fetching for all the variables.
 
 # Annex 1
 
