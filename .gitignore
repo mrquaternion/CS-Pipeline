@@ -1,2 +1,4 @@
 Containers
 .DS_Store
+carbonpipeline.egg-info
+carbonpipeline/__pycache__/*

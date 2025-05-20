@@ -45,7 +45,9 @@ There's 2 options :
 - `ecCodes` (CLI) : https://confluence.ecmwf.int/display/ECC/ecCodes+Home
 - `Metview` (GUI) : https://metview.readthedocs.io/en/latest/
 
-More can be read here https://confluence.ecmwf.int/display/CKB/What+are+GRIB+files+and+how+can+I+read+them
+More can be read here https://confluence.ecmwf.int/display/CKB/What+are+GRIB+files+and+how+can+I+read+them.
+
+In CLI, grib files content can be displayed as such: `grib_ls your_file.grib`
 
 # Predictors in CarbonSense
 
@@ -134,6 +136,31 @@ Wind speed, as said in the variable description of ERA5, vary on small space and
 
 [^fn1]: With this video https://www.youtube.com/watch?v=uiUll-xAFMc, I was able to figure out something. The initial supposition is that in the air, the only elements that can vary is the water (humidity) and carbon dioxide (GHG). Go to Annex 1.
 
+# Coding
+
+## Optimizing API calls
+
+If you group columns by any shared missing timestamp (union-find), you end up with overly coarse clusters. For example, if column X is missing every hour, it unions with column Y (missing only 1/7 of hours), and then chains through Y to every other variable that shares at least one hole—so you’ll request X data even on days when you only needed Y.
+
+**Instead**, build a “missing-variable set” *per row* and then group rows by that set. Take for example this toy dataset with three variables A, B, C and hourly timestamps:
+
+| Index |  A   |  B   |  C   | timestamp |
+| :---- | :--: | :--: | :--: | :-------: |
+| 1     |  a   |      |  c   |   00:00   |
+| 2     |  c   |      |      |   01:00   |
+| 3     |  b   |      |  b   |   02:00   |
+| 4     |  g   |      |      |   03:00   |
+| 5     |      |      |      |   04:00   |
+| 6     |  e   |      |  d   |   05:00   |
+
+**Group 1** $\rightarrow$ would have the rows 1, 3 and 6 with the timestamps [00:00, 02:00, 05:00]
+**Group 2** $\rightarrow$ would have the rows 2 and 4 with the timestamps [01:00, 03:00]
+**Group 3** $\rightarrow$ would have the row 5 with the timestamp [04:00]
+
+### UPDATE
+
+This isn't working neither. Grouping like this makes to many API calls even if we coarse to the max. Will not make sense. Will follow for now with the original approach of getting fetching for all the variables.
+
 # Annex 1
 
 We know the relative humidity `RH`, the atmospheric temperature `TA` (at 2 meters) and the surface pressure `PA`. We also know the molar fraction of carbon dioxide in dry air $X^\text{dry air}_{\text{CO}_2}\ [\mu \text{mol}/\text{mol}]$ given by the other dataset (see the corresponding link in the Modification column). Thus, we can find the fraction of $\text{H}_2\text{O}$ in dry air.
@@ -156,3 +183,4 @@ $$
 For `(1)`, see https://en.wikipedia.org/wiki/Antoine_equation.
 
 Note: The CO2 dataset has a larger resolution than ERA5 on single levels. Maybe something has to be done here beforehand?
+

@@ -13,3 +13,6 @@ dependencies = [
 
 [project.scripts]
 carbonpipeline = "carbonpipeline.cli:main"
+
+[tool.setuptools]
+packages = ["carbonpipeline"]
