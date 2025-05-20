@@ -16,10 +16,8 @@ def processing(file: str, lat: float, lon: float):
     The attribute `file` in the argument of the CLI is CSV file. The latitude/longitude 
     attributs are meant to represent the coordinates of the EC tower the dataset is from.
 
-    The process is to find all the missing values for a column X and to obtain the corresponding timestamp.
-    From there, we have, for each column, each timestamp where there's a missing value. We then use a data
-    structure called disjoint set with the union-find algorithm to group all the column who share a row with
-    missing values. This is all done to optimize API calls. See the markdown file in the `research/` dir for more info.
+    The process is to find all the rows with missing values. Some datasets have all there 
+    rows with at least one missing value, others don't.
     """
     column_mapping = {
         'CO2_F_MDS': 'CO2',
@@ -57,7 +55,6 @@ def processing(file: str, lat: float, lon: float):
 
     miss['year']  = miss['timestamp'].dt.year
     miss['month'] = miss['timestamp'].dt.month
-    miss['day']   = miss['timestamp'].dt.day
 
     times = [f"{h:02d}:00" for h in range(24)]
     days = [f"{d:02d}" for d in range(1, 32)]
