@@ -3,3 +3,4 @@ Containers
 carbonpipeline.egg-info
 carbonpipeline/__pycache__/*
 predictors.csv
+datasets/

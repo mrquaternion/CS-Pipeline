@@ -1,12 +1,15 @@
 # carbonpipeline/cli.py
 import argparse
-from collections import defaultdict
+import os
+
+from tqdm import tqdm
 from carbonpipeline.processing_utils import *
 from carbonpipeline.api_request import APIRequest
 import xarray as xr
 import pandas as pd
-import numpy as np
 from datetime import datetime
+import zipfile
+
 
 
 def processing(file: str, lat: float, lon: float):
@@ -21,24 +24,24 @@ def processing(file: str, lat: float, lon: float):
     """
     column_mapping = {
         'CO2_F_MDS': 'CO2',
-        'G_F_MDS': 'G',
-        'H_F_MDS': 'H',
-        'LE_F_MDS': 'LE',
-        'LW_IN_F': 'LW_IN',
-        'LW_OUT': 'LW_OUT',
-        'NETRAD': 'NETRAD',
-        'PA_F': 'PA',
-        'PPFD_IN': 'PPFD_IN',
-        'PPFD_OUT': 'PPFD_OUT',
-        'P_F': 'P',
-        'RH': 'RH',
-        'SW_IN_F': 'SW_IN',
-        'SW_OUT': 'SW_OUT',
-        'TA_F': 'TA',
-        'USTAR': 'USTAR',
-        'VPD_F': 'VPD',
-        'WD': 'WD',
-        'WS_F': 'WS',
+        'G_F_MDS':   'G',
+        'H_F_MDS':   'H',
+        'LE_F_MDS':  'LE',
+        'LW_IN_F':   'LW_IN',
+        'LW_OUT':    'LW_OUT',
+        'NETRAD':    'NETRAD',
+        'PA_F':      'PA',
+        'PPFD_IN':   'PPFD_IN',
+        'PPFD_OUT':  'PPFD_OUT',
+        'P_F':       'P',
+        'RH':        'RH',
+        'SW_IN_F':   'SW_IN',
+        'SW_OUT':    'SW_OUT',
+        'TA_F':      'TA',
+        'USTAR':     'USTAR',
+        'VPD_F':     'VPD',
+        'WD':        'WD',
+        'WS_F':      'WS',
         'timestamp': 'timestamp'
     }
 
@@ -48,22 +51,33 @@ def processing(file: str, lat: float, lon: float):
     filtered_df = filtered_and_renamed_columns(df, column_mapping)
     filtered_df['timestamp'] = pd.to_datetime(filtered_df['timestamp'])
 
-    vars_ = filtered_df.columns.drop('timestamp')
-
     # keep only rows with any missing
-    miss = filtered_df[filtered_df[vars_].isnull().any(axis=1)].copy()
+    miss = filtered_df[filtered_df[filtered_df.columns.drop('timestamp')].isnull().any(axis=1)].copy()
 
+    # create new columns for year & month
     miss['year']  = miss['timestamp'].dt.year
     miss['month'] = miss['timestamp'].dt.month
 
-    times = [f"{h:02d}:00" for h in range(24)]
     days = [f"{d:02d}" for d in range(1, 32)]
+    times = [f"{h:02d}:00" for h in range(24)]
 
-    # group by (year, month)
+    # group by year
     for (year, month), _ in miss.groupby(['year', 'month']):
-        print(f"\nRequesting {year}-{month:02d}")
+        print(f"\n############ Requesting {year}-{month:02d} ############")
+        request_id = query(year, month, days, times, lat, lon)
 
-        request = APIRequest(
+        print(f"############ Unzipping the file ############")
+        out_zip_path = f"./datasets/zip/{request_id}.zip"
+        out_unzip_path = f"./datasets/unzip/data_{year}-{month:02d}"
+        os.makedirs(out_unzip_path, exist_ok=True)
+
+        unzip_grib(out_zip_path, out_unzip_path)
+        
+    
+    # dataset = xr.open_dataset(file, engine="cfgrib")
+
+def query(year: str, month: int, days: list[int], times: list[int], lat: float, lon: float):
+    request = APIRequest(
             year=[str(year)],
             month=[f"{month:02d}"],
             day=days,
@@ -71,9 +85,16 @@ def processing(file: str, lat: float, lon: float):
             lat=lat,
             lon=lon
         )
-        request.query()
+    return request.get_id_and_download()
 
-    # dataset = xr.open_dataset(file, engine="cfgrib")
+
+def unzip_grib(zip_path: str, unzip_path: str):
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        for member in tqdm(zip_ref.infolist(), desc='Extracting '):
+            try:
+                zip_ref.extractall(unzip_path)
+            except zipfile.error as e:
+                pass
 
 
 def parse_timestamp(ts: str):

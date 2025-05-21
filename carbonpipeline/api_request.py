@@ -1,7 +1,7 @@
 # carbonpipeline/api_request.py
+import os
 from typing import List
 import cdsapi
-import numpy as np
 
 ERA5_PREDICTORS = [
     "10m_u_component_of_wind",
@@ -37,20 +37,28 @@ class APIRequest:
         self.lat = lat
         self.lon = lon
 
-    def query(self):
+    def get_id_and_download(self):
         dataset = "reanalysis-era5-single-levels"
         request = {
-            "product_type": ["reanalysis"],
-            "variable": ERA5_PREDICTORS,
-            "year": self.year,
-            "month": self.month,
-            "day": self.day,
-            "time": self.time,
-            'area': [self.lat + 0.1, self.lon - 0.1, self.lat - 0.1, self.lon + 0.1],
-            "data_format": "grib",
+            "product_type":    ["reanalysis"],
+            "variable":        ERA5_PREDICTORS,
+            "year":            self.year,
+            "month":           self.month,
+            "day":             self.day,
+            "time":            self.time,
+            "area":            [self.lat + 0.1, self.lon - 0.1, self.lat - 0.1, self.lon + 0.1],
+            "data_format":     "grib",
             "download_format": "zip"
         }
 
-        client = cdsapi.Client()
-        client.retrieve(dataset, request).download()
+        client = cdsapi.Client(wait_until_complete=False, delete=False)
+        result = client.retrieve(dataset, request)
+
+        dir_ = "./datasets/zip/"
+        os.makedirs(dir_, exist_ok=True)
+        out_zip_path = os.path.join(dir_, result.request_id + ".zip")
+
+        result.download(out_zip_path)
+
+        return result.request_id
 
