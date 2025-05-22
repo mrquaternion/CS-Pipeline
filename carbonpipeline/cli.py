@@ -2,13 +2,17 @@
 import argparse
 import os
 
-from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
+import time
+from typing import Tuple
+
+import cfgrib
 from carbonpipeline.processing_utils import *
 from carbonpipeline.api_request import APIRequest
 import xarray as xr
 import pandas as pd
 from datetime import datetime
-import zipfile
 
 
 
@@ -54,60 +58,111 @@ def processing(file: str, lat: float, lon: float):
     # keep only rows with any missing
     miss = filtered_df[filtered_df[filtered_df.columns.drop('timestamp')].isnull().any(axis=1)].copy()
 
-    # create new columns for year & month
+    # create new columns for year, month & day
     miss['year']  = miss['timestamp'].dt.year
     miss['month'] = miss['timestamp'].dt.month
+    miss['day'] = miss['timestamp'].dt.day
 
-    days = [f"{d:02d}" for d in range(1, 32)]
     times = [f"{h:02d}:00" for h in range(24)]
 
-    # group by year
-    for (year, month), _ in miss.groupby(['year', 'month']):
-        print(f"\n############ Requesting {year}-{month:02d} ############")
-        request_id = query(year, month, days, times, lat, lon)
+    # multiprocessing for faster download
+    nb_of_hours = 47
+    temp = miss.loc[:nb_of_hours] # ONLY THERE FOR TEST (1 day worth of data)
+    groups = list(temp.groupby(['year', 'month', 'day']))
+    query_partial = partial(query, times=times, lat=lat, lon=lon)
 
-        print(f"############ Unzipping the file ############")
-        out_zip_path = f"./datasets/zip/{request_id}.zip"
-        out_unzip_path = f"./datasets/unzip/data_{year}-{month:02d}"
-        os.makedirs(out_unzip_path, exist_ok=True)
+    start = time.time()
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        executor.map(query_partial, groups)
+    end = time.time()
 
-        unzip_grib(out_zip_path, out_unzip_path)
+    delta = end - start
+    print(f"Time taken to download {(nb_of_hours + 1)/24} day worth of data: {delta} seconds")
         
-    
-    # dataset = xr.open_dataset(file, engine="cfgrib")
+    df = merge_datasets()
 
-def query(year: str, month: int, days: list[int], times: list[int], lat: float, lon: float):
+
+def rename_combined(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    To improve readability, the `shortName` columns in the original GRIB files are being renamed to 
+    their expanded names.
+    """
+    short_to_full = {
+        '10u': '10m_u_component_of_wind',
+        '10v': '10m_v_component_of_wind',
+        '2t': '2m_temperature',
+        '2d': '2m_dewpoint_temperature',
+        'sp': 'surface_pressure',
+        'tp': 'total_precipitation',
+        'avg_sdlwrf': 'mean_surface_downward_long_wave_radiation_flux',
+        'avg_sdlwrfcs': 'mean_surface_downward_long_wave_radiation_flux_clear_sky',
+        'avg_sdswrf': 'mean_surface_downward_short_wave_radiation_flux',
+        'avg_sdswrfcs': 'mean_surface_downward_short_wave_radiation_flux_clear_sky',
+        'ishf': 'instantaneous_surface_sensible_heat_flux',
+        'slhf': 'surface_latent_heat_flux',
+        'sshf': 'surface_sensible_heat_flux',
+        'stl1': 'soil_temperature_level_1',
+        'stl2': 'soil_temperature_level_2',
+        'stl3': 'soil_temperature_level_3',
+        'swvl1': 'volumetric_soil_water_layer_1',
+        'swvl2': 'volumetric_soil_water_layer_2',
+        'swvl3': 'volumetric_soil_water_layer_3',
+        'fal': 'forecast_albedo',
+        'zust': 'friction_velocity'
+    }
+    return df.rename(columns=short_to_full)
+
+
+def merge_datasets() -> pd.DataFrame:
+    """
+    Instead of querying for the whole time interval of the `predictors.csv` file, we queried for each day.
+
+    Now, merging every GRIB file together by `time`.
+    """
+    dataframes = []
+    directory = "./datasets/"
+    for name in os.listdir(directory): # source: https://www.geeksforgeeks.org/python-loop-through-folders-and-files-in-directory/
+        if name.endswith(".grib"):
+            path_to_file = os.path.join(directory, name)
+            ds_list = cfgrib.open_datasets(path_to_file, decode_timedelta=True)
+            ds = xr.merge(ds_list, compat="override")
+            df = ds.to_dataframe()
+            dataframes.append(df)
+
+    combined = pd.concat(dataframes, axis=1)
+    return rename_combined(combined)
+
+    
+
+def query(groupby_df: tuple, times: list[int], lat: float, lon: float):
+    """
+    Prepare the API request with args formatting and fetches the download.
+    """
+    (year, month, day), _ = groupby_df
     request = APIRequest(
-            year=[str(year)],
-            month=[f"{month:02d}"],
-            day=days,
+            year=str(year),
+            month=f"{month:02d}",
+            day=f"{day:02d}",
             time=times,
             lat=lat,
             lon=lon
         )
-    return request.get_id_and_download()
+    
+    print(f"############ Download started for {year}-{month:02d}-{day:02d} ############")
+    request.fetch_download()
+    print(f"############ Download finished for {year}-{month:02d}-{day:02d} ############")
 
 
-def unzip_grib(zip_path: str, unzip_path: str):
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        for member in tqdm(zip_ref.infolist(), desc='Extracting '):
-            try:
-                zip_ref.extractall(unzip_path)
-            except zipfile.error as e:
-                pass
-
-
-def parse_timestamp(ts: str):
+def parse_timestamp(ts: str) -> Tuple[datetime.date, str]:
     dt = datetime.fromisoformat(ts)
     return dt.date(), dt.strftime("%H:%M")
 
 
-def filtered_and_renamed_columns(df: pd.DataFrame, column_mapping: dict):
+def filtered_and_renamed_columns(df: pd.DataFrame, column_mapping: dict) -> pd.DataFrame:
     """
     This function serves as a renaming process to ease the reading of the dataset.
     """
     filtered_columns = [col for col in column_mapping.keys() if col in df.columns]
-
     return df[filtered_columns].rename(columns=column_mapping)
 
 

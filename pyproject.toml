@@ -8,7 +8,9 @@ dependencies = [
     "xarray",
     "numpy",
     "eccodes",
-    "pandas"
+    "pandas",
+    "ipykernel",
+    "cfgrib"
 ]
 
 [project.scripts]
