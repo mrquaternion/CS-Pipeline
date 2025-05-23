@@ -14,7 +14,6 @@ ERA5_VARIABLES = [
     "surface_pressure",
     "total_precipitation",
     "mean_surface_downward_long_wave_radiation_flux",
-    "mean_surface_downward_long_wave_radiation_flux_clear_sky",
     "mean_surface_downward_short_wave_radiation_flux",
     "mean_surface_downward_short_wave_radiation_flux_clear_sky",
     "surface_latent_heat_flux",
@@ -29,15 +28,29 @@ ERA5_VARIABLES = [
     "friction_velocity"
 ]
 
-VARIABLES_ORIGIN = {
+VARIABLES_ORIGIN = { # Verified with case by case request and DataFrame plotting
     "fc": [ # Forecast
         'mean_surface_downward_long_wave_radiation_flux', 
-        'mean_surface_downward_long_wave_radiation_flux_clear_sky', 
         'mean_surface_downward_short_wave_radiation_flux',
-        'mean_surface_downward_short_wave_radiation_flux_clear_sky'
+        'mean_surface_downward_short_wave_radiation_flux_clear_sky',
+        'total_precipitation',
+        'surface_latent_heat_flux',
+        'surface_sensible_heat_flux',
+        'friction_velocity'
         ], 
     "ra": [ # Reanalysis
-
+        '10m_u_component_of_wind',
+        '10m_v_component_of_wind',
+        '2m_dewpoint_temperature',
+        '2m_temperature',
+        'surface_pressure',
+        'soil_temperature_level_1',
+        'soil_temperature_level_2',
+        'soil_temperature_level_3"',
+        'volumetric_soil_water_layer_1',
+        'volumetric_soil_water_layer_2',
+        'volumetric_soil_water_layer_3',
+        'forecast_albedo'
     ] 
 }
 
@@ -104,7 +117,6 @@ SHORTNAME_TO_FULLNAME = {
     'sp': 'surface_pressure',
     'tp': 'total_precipitation',
     'avg_sdlwrf': 'mean_surface_downward_long_wave_radiation_flux',
-    'avg_sdlwrfcs': 'mean_surface_downward_long_wave_radiation_flux_clear_sky',
     'avg_sdswrf': 'mean_surface_downward_short_wave_radiation_flux',
     'avg_sdswrfcs': 'mean_surface_downward_short_wave_radiation_flux_clear_sky',
     'slhf': 'surface_latent_heat_flux',

@@ -31,11 +31,11 @@ def processing(file: str, lat: float, lon: float, preds: list[str]):
 
     miss = missing_rows(filtered_df.copy()) # Keep only rows with any missing
 
-    # -------------------------------------------------------------------------------------------------
-    nb_of_hours = 47                                        # ONLY THERE FOR TEST (1 day worth of data)
-    temp = miss.loc[:nb_of_hours]                           # ONLY THERE FOR TEST (1 day worth of data)
-    groups = list(temp.groupby(['year', 'month', 'day']))   # ONLY THERE FOR TEST (1 day worth of data)
-    # -------------------------------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    nb_of_hours = 10                                        # ONLY THERE FOR TEST 
+    temp = miss.loc[:nb_of_hours]                           # ONLY THERE FOR TEST 
+    groups = list(temp.groupby(['year', 'month', 'day']))   # ONLY THERE FOR TEST 
+    # ---------------------------------------------------------------------------
     
     times = [f"{h:02d}:00" for h in range(24)]
 
