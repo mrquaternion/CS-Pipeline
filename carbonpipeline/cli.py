@@ -154,7 +154,7 @@ def main():
                 invalid.append(pred)
         if invalid:
             parser.error(f"\nInvalid predictor(s): {', '.join(invalid)} \nValid options are: {', '.join(VALID_PREDICTORS)}")
-
+    
     my_set = set()
     if args.preds is None:
         vars_ = ERA5_VARIABLES
@@ -163,7 +163,7 @@ def main():
             for var in VARIABLES_FOR_PREDICTOR[pred]:
                 my_set.add(var) # Avoid duplicates
         vars_ = list(my_set)
-
+    
     print(f"File: {args.file}")
     print(f"Latitude: {args.lat}, Longitude: {args.lon}")
     print(f"Predictors: {vars_}")

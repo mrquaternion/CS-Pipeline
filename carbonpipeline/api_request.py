@@ -17,7 +17,7 @@ class APIRequest:
         lon (float): Longitude of the site.
         preds (list[str) | None): Optional list of high-level predictors under AMERIFLUX naming.
     """
-    def __init__(self, year: str, month: str, day: str, time: list[str], lat: float, lon: float, preds: list[str] | None):
+    def __init__(self, year: str, month: str, day: str, time: list[str], lat: float, lon: float, preds: list[str]):
         self.year = year
         self.month = month
         self.day = day
@@ -26,7 +26,7 @@ class APIRequest:
         self.lon = lon
         self.preds = preds
 
-    def fetch_download(self):
+    def fetch_download(self, dir_: str):
         """
         Constructs and submits a download request to the CDS API for ERA5 single-level reanalysis data.
 
@@ -49,8 +49,6 @@ class APIRequest:
         client = cdsapi.Client(wait_until_complete=False, delete=False)
         result = client.retrieve(dataset, request)
 
-        dir_ = "./datasets/"
-        os.makedirs(dir_, exist_ok=True)
         end_dir_ = f"data_{self.year}-{self.month}-{self.day}.grib"
         out_path = os.path.join(dir_, end_dir_)
 

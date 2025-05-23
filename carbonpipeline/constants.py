@@ -59,7 +59,7 @@ VARIABLES_FOR_PREDICTOR = {
     "WTD":       [''], # Make another request to https://github.com/UU-Hydro/GLOBGM 
     "G":         ['instantaneous_surface_sensible_heat_flux'],
     "H":         ['surface_sensible_heat_flux'],
-    "L":         ['surface_latent_heat_flux']
+    "LE":        ['surface_latent_heat_flux']
 }
 
 COLUMN_NAME_MAPPING = {
