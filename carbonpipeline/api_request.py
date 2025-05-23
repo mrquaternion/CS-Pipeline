@@ -1,45 +1,42 @@
 # carbonpipeline/api_request.py
 import os
 import cdsapi
+from carbonpipeline.constants import *
 
-ERA5_PREDICTORS = [
-    "10m_u_component_of_wind",
-    "10m_v_component_of_wind",
-    "2m_dewpoint_temperature",
-    "2m_temperature",
-    "surface_pressure",
-    "total_precipitation",
-    "mean_surface_downward_long_wave_radiation_flux",
-    "mean_surface_downward_long_wave_radiation_flux_clear_sky",
-    "mean_surface_downward_short_wave_radiation_flux",
-    "mean_surface_downward_short_wave_radiation_flux_clear_sky",
-    "instantaneous_surface_sensible_heat_flux",
-    "surface_latent_heat_flux",
-    "surface_sensible_heat_flux",
-    "soil_temperature_level_1",
-    "soil_temperature_level_2",
-    "soil_temperature_level_3",
-    "volumetric_soil_water_layer_1",
-    "volumetric_soil_water_layer_2",
-    "volumetric_soil_water_layer_3",
-    "forecast_albedo",
-    "friction_velocity"
-]
 
 class APIRequest:
-    def __init__(self, year: str, month: str, day: str, time: list[int], lat: float, lon: float):
+    """
+    Represents a request to the ERA5 dataset for a specific date, location and set of variables.
+
+    Parameters:
+        year (str): Year of the request.
+        month (str): Month of the request.
+        day (str): Day of the request.
+        time (list[str]): Time in "HH:MM" format.
+        lat (float): Latitude of the site.
+        lon (float): Longitude of the site.
+        preds (list[str) | None): Optional list of high-level predictors under AMERIFLUX naming.
+    """
+    def __init__(self, year: str, month: str, day: str, time: list[str], lat: float, lon: float, preds: list[str] | None):
         self.year = year
         self.month = month
         self.day = day
         self.time = time
         self.lat = lat
         self.lon = lon
+        self.preds = preds
 
     def fetch_download(self):
+        """
+        Constructs and submits a download request to the CDS API for ERA5 single-level reanalysis data.
+
+        Returns:
+            None. The file is downloaded directly to disk, in the `./datasets/` directory.
+        """
         dataset = "reanalysis-era5-single-levels"
         request = {
             "product_type":    ["reanalysis"],
-            "variable":        ERA5_PREDICTORS,
+            "variable":        self.preds,
             "year":            [self.year],
             "month":           [self.month],
             "day":             [self.day],
