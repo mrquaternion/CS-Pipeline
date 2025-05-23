@@ -17,7 +17,6 @@ ERA5_VARIABLES = [
     "mean_surface_downward_long_wave_radiation_flux_clear_sky",
     "mean_surface_downward_short_wave_radiation_flux",
     "mean_surface_downward_short_wave_radiation_flux_clear_sky",
-    "instantaneous_surface_sensible_heat_flux",
     "surface_latent_heat_flux",
     "surface_sensible_heat_flux",
     "soil_temperature_level_1",
@@ -29,6 +28,18 @@ ERA5_VARIABLES = [
     "forecast_albedo",
     "friction_velocity"
 ]
+
+VARIABLES_ORIGIN = {
+    "fc": [ # Forecast
+        'mean_surface_downward_long_wave_radiation_flux', 
+        'mean_surface_downward_long_wave_radiation_flux_clear_sky', 
+        'mean_surface_downward_short_wave_radiation_flux',
+        'mean_surface_downward_short_wave_radiation_flux_clear_sky'
+        ], 
+    "ra": [ # Reanalysis
+
+    ] 
+}
 
 VARIABLES_FOR_PREDICTOR = {
     "TA":        ['2m_temperature'],
@@ -57,7 +68,7 @@ VARIABLES_FOR_PREDICTOR = {
     "TS_4":      ['soil_temperature_level_2'],
     "TS_5":      ['soil_temperature_level_3'],
     "WTD":       [''], # Make another request to https://github.com/UU-Hydro/GLOBGM 
-    "G":         ['instantaneous_surface_sensible_heat_flux'],
+    "G":         ['surface_sensible_heat_flux', 'surface_latent_heat_flux', 'mean_surface_downward_short_wave_radiation_flux', 'mean_surface_downward_long_wave_radiation_flux', 'forecast_albedo'],
     "H":         ['surface_sensible_heat_flux'],
     "LE":        ['surface_latent_heat_flux']
 }
@@ -96,7 +107,6 @@ SHORTNAME_TO_FULLNAME = {
     'avg_sdlwrfcs': 'mean_surface_downward_long_wave_radiation_flux_clear_sky',
     'avg_sdswrf': 'mean_surface_downward_short_wave_radiation_flux',
     'avg_sdswrfcs': 'mean_surface_downward_short_wave_radiation_flux_clear_sky',
-    'ishf': 'instantaneous_surface_sensible_heat_flux',
     'slhf': 'surface_latent_heat_flux',
     'sshf': 'surface_sensible_heat_flux',
     'stl1': 'soil_temperature_level_1',
