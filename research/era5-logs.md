@@ -161,6 +161,13 @@ If you group columns by any shared missing timestamp (union-find), you end up wi
 
 This isn't working neither. Grouping like this makes too many API calls even if we coarse to the max. Will not make sense. Will follow for now with the original approach of getting fetching for all the variables.
 
+## Output
+
+The wanted target goal is to give back the same original given dataset but instead of having a simple table of predictors, the table would have a hierarchical structure where each predictor is a category (first level of column MultiIndex) and the subcolumns (second level of column MultiIndex) would be the values from
+
+1. Original dataset
+2. ERA5 processed"[v]
+
 # Annex 1
 
 We know the relative humidity `RH`, the atmospheric temperature `TA` (at 2 meters) and the surface pressure `PA`. We also know the molar fraction of carbon dioxide in dry air $X^\text{dry air}_{\text{CO}_2}\ [\mu \text{mol}/\text{mol}]$ given by the other dataset (see the corresponding link in the Modification column). Thus, we can find the fraction of $\text{H}_2\text{O}$ in dry air.
