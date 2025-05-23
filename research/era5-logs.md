@@ -128,9 +128,9 @@ Legend for each column:
 | TS_4 (at 20 cm under surface)  | 1    | Soil temperature level 2 $(\text{K})$                        | Convert $\degree \text{K}$ to $\degree \text{C}$             |
 | TS_5 (at 20 cm under surface)  | 1    | Soil temperature level 3 $(\text{K})$                        | Convert $\degree \text{K}$ to $\degree \text{C}$             |
 | WTD                            | 3    |                                                              | Look here https://github.com/UU-Hydro/GLOBGM                 |
-| G                              | 1    | Instantaneous surface sensible heat flux $(\frac{W}{m^2})$   |                                                              |
-| H                              | 1    | Mean surface sensible heat flux $(\frac{W}{m^2})$            |                                                              |
-| LE                             | 1    | Mean surface latent heat flux $(\frac{W}{m^2})$              |                                                              |
+| G                              | 2    | `NETRAD`, `LE` & `H` $(\frac{W}{m^2})$                       | The formula is $\text{G} = \text{NETRAD} - \text{H} - \text{LE}$. Look here https://iahs.info/uploads/dms/16743.28-140-144-343-10-Jansen.pdf |
+| H                              | 1    | Surface sensible heat flux $(\frac{W}{m^2})$                 |                                                              |
+| LE                             | 1    | Surface latent heat flux $(\frac{W}{m^2})$                   |                                                              |
 
 Wind speed, as said in the variable description of ERA5, vary on small space and time scales and are affected by the local terrain, vegetation and buildings. So we are not considering the neutral wind because it ignores too much the context where the EC towers are placed.
 
@@ -138,7 +138,7 @@ Wind speed, as said in the variable description of ERA5, vary on small space and
 
 # Coding
 
-## Optimizing API calls
+## Optimizing API calls (not valid, see UPDATE)
 
 If you group columns by any shared missing timestamp (union-find), you end up with overly coarse clusters. For example, if column X is missing every hour, it unions with column Y (missing only 1/7 of hours), and then chains through Y to every other variable that shares at least one hole—so you’ll request X data even on days when you only needed Y.
 
