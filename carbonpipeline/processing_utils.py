@@ -1,12 +1,6 @@
 # carbonpipeline/processing_utils.py
 import numpy as np
-
-# -------------- Constants --------------
-ZERO_C_IN_K = 273.15
-
-DRY_AIR_MOLE_FRACTION_N2 = 0.7808
-DRY_AIR_MOLE_FRACTION_O2 = 0.2095
-DRY_AIR_MOLE_FRACTION_AR = 0.0093
+from carbonpipeline.constants import *
 
 # -------------- Conversion --------------
 def kelvin_to_celsius(T_K):
