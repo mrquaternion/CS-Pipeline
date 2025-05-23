@@ -1,10 +1,9 @@
 # carbonpipeline/cli.py
 import argparse
-import os
+import os, shutil, time
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-import time
 from typing import Tuple
 
 import cfgrib
@@ -16,7 +15,7 @@ from datetime import datetime
 from carbonpipeline.constants import *
 
 
-def processing(file: str, lat: float, lon: float, predictors: list[str] | None):
+def processing(file: str, lat: float, lon: float, preds: list[str]):
     """
     This function is intended to be used as the following.
 
@@ -39,8 +38,13 @@ def processing(file: str, lat: float, lon: float, predictors: list[str] | None):
     # -------------------------------------------------------------------------------------------------
     
     times = [f"{h:02d}:00" for h in range(24)]
-    preds = ERA5_VARIABLES if predictors is None else [var for pred in predictors for var in VARIABLES_FOR_PREDICTOR[pred]]
-    query_partial = partial(query, times=times, lat=lat, lon=lon, pred=preds) # Initialize the the arguments for the query
+
+    # Clean the folder before new query (CHANGE LATER ON TO CHECK INSTEAD IF THE DATA ALREADY HAS BEEN DOWNLOADED i.e. *with download logs*)
+    dir_ = "./datasets/"
+    if os.path.exists(dir_):
+        shutil.rmtree(dir_)
+    os.makedirs(dir_, exist_ok=True)
+    query_partial = partial(query, dir_=dir_, times=times, lat=lat, lon=lon, preds=preds) # Initialize the the arguments for the query
     # groups = list(miss.groupby(['year', 'month', 'day']))
 
     # Multiprocessing for faster download
@@ -53,8 +57,6 @@ def processing(file: str, lat: float, lon: float, predictors: list[str] | None):
         
     df = merge_datasets()   
     
-
-
 
 
 def missing_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -116,7 +118,7 @@ def merge_datasets() -> pd.DataFrame:
     return rename_combined_dataframe(combined)
 
 
-def query(groupby_df: tuple, times: list[str], lat: float, lon: float, predictors: list[str] | None):
+def query(groupby_df: tuple, dir_: str, times: list[str], lat: float, lon: float, preds: list[str]):
     """
     Prepare the API request with args formatting and fetches the download.
     """
@@ -128,11 +130,11 @@ def query(groupby_df: tuple, times: list[str], lat: float, lon: float, predictor
             time=times,
             lat=lat,
             lon=lon,
-            preds=predictors
+            preds=preds
         )
     
     print(f"############ Download started for {year}-{month:02d}-{day:02d} ############")
-    request.fetch_download()
+    request.fetch_download(dir_)
     print(f"############ Download finished for {year}-{month:02d}-{day:02d} ############")
 
 
@@ -150,12 +152,23 @@ def main():
         for pred in args.preds:
             if pred not in VALID_PREDICTORS:
                 invalid.append(pred)
-        parser.error(f"\nInvalid predictor(s): {', '.join(invalid)} \nValid options are: {', '.join(VALID_PREDICTORS)}")
+        if invalid:
+            parser.error(f"\nInvalid predictor(s): {', '.join(invalid)} \nValid options are: {', '.join(VALID_PREDICTORS)}")
+
+    my_set = set()
+    if args.preds is None:
+        vars_ = ERA5_VARIABLES
+    else:
+        for pred in args.preds:
+            for var in VARIABLES_FOR_PREDICTOR[pred]:
+                my_set.add(var) # Avoid duplicates
+        vars_ = list(my_set)
 
     print(f"File: {args.file}")
-    print(f"Lat: {args.lat}, Lon: {args.lon}")
+    print(f"Latitude: {args.lat}, Longitude: {args.lon}")
+    print(f"Predictors: {vars_}")
 
-    processing(args.file, args.lat, args.lon, args.preds)
+    processing(args.file, args.lat, args.lon, vars_)
 
 if __name__ == "__main__":
     main()
