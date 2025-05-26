@@ -19,8 +19,9 @@ def processing(file: str, lat: float, lon: float, preds: list[str]):
     """
     This function is intended to be used as the following.
 
-    The attribute `file` in the argument of the CLI is CSV file. The latitude/longitude 
-    attributs are meant to represent the coordinates of the EC tower the dataset is from.
+    The attribute `file` in the argument of the CLI is CSV file (tested with CarbonSense V1 DDCFM 
+    `predictors.csv` files). The latitude/longitude attributs are meant to represent the coordinates 
+    of the EC tower the dataset is from.
     """
 
     cs_dataset = pd.read_csv(file)
@@ -31,10 +32,10 @@ def processing(file: str, lat: float, lon: float, preds: list[str]):
 
     miss = missing_rows(filtered_df.copy()) # Keep only rows with any missing
 
-    # ---------------------------------------------------------------------------
-    nb_of_hours = 10                                        # ONLY THERE FOR TEST 
-    temp = miss.loc[:nb_of_hours]                           # ONLY THERE FOR TEST 
-    groups = list(temp.groupby(['year', 'month', 'day']))   # ONLY THERE FOR TEST 
+    # ---------------------- Testing  # of hours to pull ------------------------
+    nb_of_hours = 10                                        
+    temp = miss.loc[:nb_of_hours]                           
+    groups = list(temp.groupby(['year', 'month', 'day']))   
     # ---------------------------------------------------------------------------
     
     times = [f"{h:02d}:00" for h in range(24)]
