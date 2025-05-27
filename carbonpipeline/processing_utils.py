@@ -31,10 +31,12 @@ def wind_speed_direction(u, v):
     return np.arctan2(v, u)
 
 
-def relative_humidity(T_air_C, T_dew_C):
+def relative_humidity(T_air_K, T_dew_K):
     """
     Source: https://arc.net/l/quote/lrazgyii
     """
+    T_air_C = kelvin_to_celsius(T_air_K)
+    T_dew_C = kelvin_to_celsius(T_dew_K)
     a, b = 17.625, 243.04
     gamma_air = (a * T_air_C)  / (b + T_air_C)
     gamma_dew = (a * T_dew_C)  / (b + T_dew_C)
@@ -85,4 +87,5 @@ def dry_to_wet_co2_fraction(T_air_K, RH_percent, p_air_pa, XCO2_dry):
              + xH2O_dry)
     
     return XCO2_dry / n_tot
+
 
