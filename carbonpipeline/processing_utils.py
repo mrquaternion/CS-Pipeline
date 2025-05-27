@@ -1,6 +1,12 @@
 # carbonpipeline/processing_utils.py
 import numpy as np
-from carbonpipeline.constants import *
+from carbonpipeline.constants import (
+    ZERO_C_IN_K,
+    DRY_AIR_MOLE_FRACTION_N2,
+    DRY_AIR_MOLE_FRACTION_O2,
+    DRY_AIR_MOLE_FRACTION_AR
+)
+
 
 # -------------- Conversion --------------
 def kelvin_to_celsius(T_K):
@@ -23,60 +29,60 @@ def volumetric_soil_water(SWC_decimal):
     return SWC_decimal * 100
 
 # -------------- Variable processing --------------
-def wind_speed_magnitude(u, v):
-    return np.hypot(u, v)
+def wind_speed_magnitude(u10, v10):
+    return np.hypot(u10, v10)
 
 
-def wind_speed_direction(u, v):
-    return np.arctan2(v, u)
+def wind_speed_direction(u10, v10):
+    return np.arctan2(v10, u10)
 
 
-def relative_humidity(T_air_K, T_dew_K):
+def relative_humidity(t2m, d2m):
     """
     Source: https://arc.net/l/quote/lrazgyii
     """
-    T_air_C = kelvin_to_celsius(T_air_K)
-    T_dew_C = kelvin_to_celsius(T_dew_K)
+    T_air_C = kelvin_to_celsius(t2m)
+    T_dew_C = kelvin_to_celsius(d2m)
     a, b = 17.625, 243.04
     gamma_air = (a * T_air_C)  / (b + T_air_C)
     gamma_dew = (a * T_dew_C)  / (b + T_dew_C)
     return 100 * np.exp(gamma_dew - gamma_air)
 
 
-def vapor_pressure_deficit(RH_percent, T_air_K):
-    RH = RH_percent / 100
-    es_kpa = saturated_vapor_pressure(kelvin_to_celsius(T_air_K))
-    vpd_kpa = es_kpa * (1 - RH)
+def vapor_pressure_deficit(t2m, d2m):
+    RH = relative_humidity(t2m, d2m)
+    es_kpa = saturated_vapor_pressure(kelvin_to_celsius(t2m))
+    vpd_kpa = es_kpa * (1 - (RH / 100))
     return kpa_to_hpa(vpd_kpa)
 
 
-def saturated_vapor_pressure(T_air_C):
+def saturated_vapor_pressure(t2m):
     """
     Tetens formula: https://en.wikipedia.org/wiki/Tetens_equation
     """
-    a = np.where(T_air_C >= 0, 17.27, 21.875)
-    b = np.where(T_air_C >= 0, 237.3, 265.5)
-    return 0.61078 * np.exp(a * T_air_C / (T_air_C + b))
+    a = np.where(t2m >= 0, 17.27, 21.875)
+    b = np.where(t2m >= 0, 237.3, 265.5)
+    return 0.61078 * np.exp(a * t2m / (t2m + b))
 
 
-def shortwave_out(SW_in, albedo):
-    return SW_in * albedo
+def shortwave_out(avg_sdswrf, fal):
+    return avg_sdswrf * fal
 
 
-def longwave_out(LW_in, albedo):
-    return LW_in * albedo
+def longwave_out(avg_sdlwrf, fal):
+    return avg_sdlwrf * fal
 
 
-def net_radiation(SW_in, LW_in, SW_out, LW_out):
-    return SW_in + LW_in - SW_out - LW_out
+def net_radiation(avg_sdswrf, avg_sdlwrf, fal):
+    return avg_sdswrf + avg_sdlwrf - shortwave_out(avg_sdswrf, fal) - longwave_out(avg_sdlwrf, fal)
 
 
-def dry_to_wet_co2_fraction(T_air_K, RH_percent, p_air_pa, XCO2_dry):
-    RH = RH_percent / 100
-    T_air_C = kelvin_to_celsius(T_air_K)
+def dry_to_wet_co2_fraction(t2m, d2m, sp, XCO2_dry):
+    RH = relative_humidity(t2m, d2m)
+    T_air_C = kelvin_to_celsius(t2m)
     es_pa = kpa_to_pa(saturated_vapor_pressure(T_air_C))
 
-    xH2O_wet = RH * es_pa / p_air_pa 
+    xH2O_wet = (RH / 100) * es_pa / sp 
     xdry_wet = 1 - xH2O_wet
     xH2O_dry = xH2O_wet / xdry_wet
 
@@ -88,4 +94,51 @@ def dry_to_wet_co2_fraction(T_air_K, RH_percent, p_air_pa, XCO2_dry):
     
     return XCO2_dry / n_tot
 
+def soil_heat_flux(avg_ishf, avg_slhtf, avg_sdswrf, avg_sdlwrf, fal):
+    NETRAD = net_radiation(avg_sdswrf, avg_sdlwrf, fal)
+    return NETRAD - avg_ishf - avg_slhtf
 
+PROCESSORS = {
+    'RH': relative_humidity,
+    'VPD': vapor_pressure_deficit,
+    'TA': kelvin_to_celsius,
+    'PA': pa_to_kpa,
+    'SW_OUT': shortwave_out,
+    'LW_OUT': longwave_out,
+    'NETRAD': net_radiation,
+    'WS': wind_speed_magnitude,
+    'WD': wind_speed_direction,
+    'G': soil_heat_flux
+}
+
+VARIABLES_FOR_PREDICTOR = {
+    "TA":        ['2m_temperature'],
+    "P":         ['total_precipitation'],
+    "RH":        ['2m_temperature', '2m_dewpoint_temperature'],
+    "VPD":       ['2m_temperature', '2m_dewpoint_temperature'],
+    "PA":        ['surface_pressure'],
+    "CO2":       ['2m_temperature', '2m_dewpoint_temperature', 'surface_pressure'], # Make another request to https://cds.climate.copernicus.eu/datasets/satellite-carbon-dioxide?tab=overview
+    "SW_IN":     ['mean_surface_downward_short_wave_radiation_flux'],
+    "SW_IN_POT": ['mean_surface_downward_short_wave_radiation_flux_clear_sky'],
+    "SW_OUT":    ['mean_surface_downward_short_wave_radiation_flux', 'forecast_albedo'],
+    "LW_IN":     ['mean_surface_downward_long_wave_radiation_flux'],
+    "LW_OUT":    ['mean_surface_downward_long_wave_radiation_flux', 'forecast_albedo'],
+    "NETRAD":    ['mean_surface_downward_short_wave_radiation_flux', 'mean_surface_downward_long_wave_radiation_flux', 'forecast_albedo'],
+    "WS":        ['10m_u_component_of_wind', '10m_v_component_of_wind'],
+    "WD":        ['10m_u_component_of_wind', '10m_v_component_of_wind'],
+    "USTAR":     ['friction_velocity'],
+    "SWC_1":     ['volumetric_soil_water_layer_1'],
+    "SWC_2":     ['volumetric_soil_water_layer_1'],
+    "SWC_3":     ['volumetric_soil_water_layer_2'],
+    "SWC_4":     ['volumetric_soil_water_layer_2'],
+    "SWC_5":     ['volumetric_soil_water_layer_3'],
+    "TS_1":      ['soil_temperature_level_1'],
+    "TS_2":      ['soil_temperature_level_1'],
+    "TS_3":      ['soil_temperature_level_2'],
+    "TS_4":      ['soil_temperature_level_2'],
+    "TS_5":      ['soil_temperature_level_3'],
+    "WTD":       [''], # Make another request to https://github.com/UU-Hydro/GLOBGM 
+    "G":         ['mean_surface_sensible_heat_flux', 'mean_surface_latent_heat_flux', 'mean_surface_downward_short_wave_radiation_flux', 'mean_surface_downward_long_wave_radiation_flux', 'forecast_albedo'],
+    "H":         ['mean_surface_sensible_heat_flux'],
+    "LE":        ['mean_surface_latent_heat_flux']
+}
