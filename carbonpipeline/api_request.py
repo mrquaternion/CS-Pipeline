@@ -26,7 +26,7 @@ class APIRequest:
         self.lon = lon
         self.preds = preds
 
-    def fetch_download(self, dir_: str):
+    def fetch_download(self, ZIP_DIR: str):
         """
         Constructs and submits a download request to the CDS API for ERA5 single-level reanalysis data.
 
@@ -42,16 +42,22 @@ class APIRequest:
             "day":             [self.day],
             "time":            self.time,
             "area":            [self.lat + 0.125, self.lon - 0.125, self.lat - 0.125, self.lon + 0.125],
-            "data_format":     "grib",
-            "download_format": "unarchived"
+            "data_format":     "netcdf",
+            "download_format": "zip"
         }
 
         client = cdsapi.Client(wait_until_complete=False, delete=False)
         result = client.retrieve(dataset, request)
 
-        end_dir_ = f"data_{self.year}-{self.month}-{self.day}.grib"
-        out_path = os.path.join(dir_, end_dir_)
+        filename = f"ERA5_{self.year}-{self.month}-{self.day}.zip"
+        target   = os.path.join(ZIP_DIR, filename)
+        
+        print(f"Starting download for {self.year}-{self.month}-{self.day} -> {target}")
+        result.download(target)
+        print(f"Finished download for {self.year}-{self.month}-{self.day}")
 
-        result.download(out_path)
+        return filename
+
+
 
 
