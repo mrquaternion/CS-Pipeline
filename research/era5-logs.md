@@ -129,8 +129,8 @@ Legend for each column:
 | TS_5 (at 20 cm under surface)  | 1    | Soil temperature level 3 $(\text{K})$                        | Convert $\degree \text{K}$ to $\degree \text{C}$             |
 | WTD                            | 3    |                                                              | Look here https://github.com/UU-Hydro/GLOBGM                 |
 | G                              | 2    | `NETRAD`, `LE` & `H` $(\frac{W}{m^2})$                       | The formula is $\text{G} = \text{NETRAD} - \text{H} - \text{LE}$. Look here https://iahs.info/uploads/dms/16743.28-140-144-343-10-Jansen.pdf |
-| H                              | 1    | Surface sensible heat flux $(\frac{W}{m^2})$                 |                                                              |
-| LE                             | 1    | Surface latent heat flux $(\frac{W}{m^2})$                   |                                                              |
+| H                              | 1    | Mean surface sensible heat flux $(\frac{W}{m^2})$                 |                                                              |
+| LE                             | 1    | Mean surface latent heat flux $(\frac{W}{m^2})$                   |                                                              |
 
 Wind speed, as said in the variable description of ERA5, vary on small space and time scales and are affected by the local terrain, vegetation and buildings. So we are not considering the neutral wind because it ignores too much the context where the EC towers are placed.
 
