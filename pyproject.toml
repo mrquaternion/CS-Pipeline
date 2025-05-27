@@ -10,7 +10,7 @@ dependencies = [
     "eccodes",
     "pandas",
     "ipykernel",
-    "cfgrib"
+    "netCDF4"
 ]
 
 [project.scripts]
