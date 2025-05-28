@@ -92,15 +92,19 @@ def processing(file: str, lat: float, lon: float, preds: list[str]):
             unzip_sub_fldrs.append(unzip_path)
             unzip_grib(zip_path, unzip_path)
         
-    df = merge_datasets(unzip_sub_fldrs)  
+    dfm = merge_datasets(unzip_sub_fldrs)  
 
     """ The area the query is being done is limited by 4 equidistant grid points. This
     yield that each point has the same 'weight', thus letting us do a simple average
     of the 4 corners. """
 
-    df = df.groupby(['valid_time']).mean()
+    dfg = dfm.groupby(['valid_time']).mean()
 
-    dataframe_restructuration(miss, preds)
+    dfr = dataframe_restructuration(miss, preds)
+
+    for pred, origin in df.columns:
+        if 'ERA' in origin:
+            dfr.loc[:, (pred, 'ERA5')] = ameriflux_to_era5(dfg, pred)
 
 
 def dataframe_restructuration(df: pd.DataFrame, preds: list[str]) -> pd.DataFrame:
@@ -257,7 +261,7 @@ def rename_combined_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=SHORTNAME_TO_FULLNAME)
 
 
-def ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.array:
+def ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.ndarray:
     """
     Converts AmeriFlux DataFrame columns to ERA5 predictor values.
 
