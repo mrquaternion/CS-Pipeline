@@ -11,3 +11,23 @@ The `carbonpipeline` package can be installed in the following way:
 4. Make sure your CDS API credentials are set up in `~/.cdsapirc`, otherwise follow this instruction https://arc.net/l/quote/ilmawrkf
 3. Finally, enter the command `pip install -e .` in your CLI
 4. Use `carbonpipeline --help` for more info!
+
+## Notes
+Currently, the pipeline only works with the following AMERIFLUX predictors: 
+- TA 
+- PA 
+- P 
+- WS 
+- WD 
+- USTAR 
+- NETRAD 
+- SW_IN 
+- SW_IN_POT 
+- SW_OUT 
+- LW_IN 
+- LW_OUT 
+- LE 
+- G 
+- H 
+- VPD 
+- RH
