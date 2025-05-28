@@ -14,7 +14,7 @@ import pandas as pd
 from carbonpipeline.constants import *
 
 
-def process_missing_data(file_path: str, lat: float, lon: float, preds: list[str]):
+def process_missing_data(file_path: str, lat: float, lon: float, start: str, end: str, preds: list[str], vars: list[str]):
     """
     Processes a CSV file containing climate or environmental data, identifies missing data points,
     and downloads the corresponding ERA5 datasets for those points using multiprocessing.
@@ -39,16 +39,14 @@ def process_missing_data(file_path: str, lat: float, lon: float, preds: list[str
         Latitude coordinate for data extraction.
     lon : float 
         Longitude coordinate for data extraction.
+    start: str
+        Desired start timestamp of the dataset.
+    end : str
+        Desired end timestamp of the dataset.
     preds : list[str]
         List of predictor variable names to query and process.
     """
-    df = load_and_filter_dataframe(file_path, COLUMN_NAME_MAPPING)
-
-    # ---------------------- Testing based on # of hours to pull ------------------------
-    # nb_of_hours = 47                                      
-    # temp = miss.loc[:nb_of_hours]                           
-    # groups = list(temp.groupby(['year', 'month', 'day']))   
-    # -----------------------------------------------------------------------------------
+    df = load_and_filter_dataframe(file_path, COLUMN_NAME_MAPPING, start, end)
     
     """ Clean the folder before new query (change later on to check instead if the data has already 
     been downloaded i.e. with download logs) """
@@ -57,15 +55,16 @@ def process_missing_data(file_path: str, lat: float, lon: float, preds: list[str
     setup_directories(ZIP_DIR, UNZIP_DIR)
     
     unzip_sub_fldrs = [] 
+    groups = list(df.groupby(['year', 'month', 'day']))
     with ProcessPoolExecutor(max_workers=4) as executor:    
         for filename in executor.map(partial(
             prepare_download_request, 
             dir_=ZIP_DIR, 
-            times=generate_hourly_times, 
+            times=generate_hourly_times(), 
             lat=lat, 
             lon=lon, 
-            preds=preds
-        ), list(df.groupby(['year', 'month', 'day']))):
+            vars=vars
+        ), groups):
             zip_path = f"./datasets/zip/{filename}"
             unzip_path = f"./datasets/unzip/{filename.split('.')[0]}"
             unzip_sub_fldrs.append(unzip_path)
@@ -74,11 +73,13 @@ def process_missing_data(file_path: str, lat: float, lon: float, preds: list[str
     """ The area the query is being done is limited by 4 equidistant grid points. This
     yield that each point has the same 'weight', thus letting us do a simple average
     of the 4 corners. """
-    postprocess_era5_data(df, preds, unzip_sub_fldrs)
+    dfpp = postprocess_era5_data(df.drop(columns=['year', 'month', 'day']), preds, unzip_sub_fldrs)
+    print(dfpp)
 
 
-def load_and_filter_dataframe(path: str, column_mapping: dict):
+def load_and_filter_dataframe(path: str, column_mapping: dict, start: str, end: str):
     df = pd.read_csv(path)
+    df = df[df['timestamp'].between(start, end)]
 
     filtered_df = filter_and_rename_columns(df, column_mapping)
     filtered_df['timestamp'] = pd.to_datetime(filtered_df['timestamp'])
@@ -138,24 +139,24 @@ def setup_directories(zip_dir: str, unzip_dir: str):
         os.makedirs(d, exist_ok=True)
 
 
-def prepare_download_request(groupby_df: tuple, dir_: str, times: list[str], lat: float, lon: float, preds: list[str]):
+def prepare_download_request(groupby_df: tuple, dir_: str, times: list[str], lat: float, lon: float, vars: list[str]):
     """
     Queries data for a specific date and location, then downloads the results.
 
     Parameters
     ----------
-        groupby_df : tuple
-            A tuple containing (year, month, day) to specify the date for the query.
-        dir\_ : str
-            The directory path where the downloaded data will be saved.
-        times : list[str]
-            List of time strings (e.g., ["00:00", "12:00"]) to include in the query.
-        lat : float 
-            Latitude coordinate for the data query.
-        lon : float
-            Longitude coordinate for the data query.
-        preds : list[str]
-            List of predictor variable names to request.
+    groupby_df : tuple
+        A tuple containing (year, month, day) to specify the date for the query.
+    dir\_ : str
+        The directory path where the downloaded data will be saved.
+    times : list[str]
+        List of time strings (e.g., ["00:00", "12:00"]) to include in the query.
+    lat : float 
+        Latitude coordinate for the data query.
+    lon : float
+        Longitude coordinate for the data query.
+    vars : list[str]
+        List of variable names to request.
     """
     year, month, day = groupby_df[0]
     request = APIRequest(
@@ -165,7 +166,7 @@ def prepare_download_request(groupby_df: tuple, dir_: str, times: list[str], lat
             time=times,
             lat=lat,
             lon=lon,
-            preds=preds
+            vars=vars
         )
     
     return request.fetch_download(dir_)
@@ -207,9 +208,12 @@ def postprocess_era5_data(df: pd.DataFrame, preds: list[str], unzip_dirs: list):
 
     Parameters
     ----------
-    df : pd.DataFrame The input DataFrame containing predictions and their origins.
-    preds : list[str] List of prediction variable names to process.
-    unzip_dirs : list List of directories containing unzipped ERA5 datasets.
+    df : pd.DataFrame 
+        The input DataFrame containing predictions and their origins.
+    preds : list[str] 
+        List of prediction variable names to process.
+    unzip_dirs : list 
+        List of directories containing unzipped ERA5 datasets.
 
     Notes
     -----
@@ -220,11 +224,15 @@ def postprocess_era5_data(df: pd.DataFrame, preds: list[str], unzip_dirs: list):
     """
     dfm = merge_datasets(unzip_dirs)  
     dfg = dfm.groupby(['valid_time']).mean()
+    print(f"DF: {df}")
+    print(f"Preds: {preds}")
     dfr = build_multiindex_dataframe(df, preds)
-    for pred, origin in df.columns:
+    print(f"DFR: {dfr}")
+    for pred, origin in dfr.columns:
         if 'ERA' in origin:
             dfr.loc[:, (pred, 'ERA5')] = convert_ameriflux_to_era5(dfg, pred)
 
+    return dfr
 
 def merge_datasets(sub_fldrs: list[str]) -> pd.DataFrame:
     """
@@ -338,7 +346,9 @@ def main():
     parser.add_argument("--file", required=True, type=str, help="Path to the dataset file")
     parser.add_argument("--lat", required=True, type=int, help="Latitude coordinate")
     parser.add_argument("--lon", required=True, type=int, help="Longitude coordinate")
-    parser.add_argument("--preds", nargs='*', help="(Optional) List of predictors to use (e.g., --preds CO2 TA RH)")
+    parser.add_argument("--start", required=True, type=str, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("--end", required=True, type=str, help="End date in YYYY-MM-DD format")
+    parser.add_argument("--preds", nargs='*', help="(Optional) List of supported predictors to use (e.g., --preds CO2 TA RH)")
     args = parser.parse_args()
 
     if args.preds is not None:
@@ -353,17 +363,19 @@ def main():
     my_set = set()
     if args.preds is None:
         vars_ = ERA5_VARIABLES
+        args.preds = list(VARIABLES_FOR_PREDICTOR.keys())
     else:
         for pred in args.preds:
             for var in VARIABLES_FOR_PREDICTOR[pred]:
                 my_set.add(var)                         # Avoid duplicates
         vars_ = list(my_set)
-    
+
     print(f"File: {args.file}")
     print(f"Latitude: {args.lat}, Longitude: {args.lon}")
-    print(f"Predictors: {vars_}")
+    print(f"Start date: {args.start}, End date: {args.end}")
+    print(f"Predictors: {args.preds}")
 
-    process_missing_data(args.file, args.lat, args.lon, vars_)
+    process_missing_data(args.file, args.lat, args.lon, args.start, args.end, args.preds, vars_)
 
 if __name__ == "__main__":
     main()
