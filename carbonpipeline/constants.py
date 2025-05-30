@@ -18,6 +18,7 @@ ERA5_VARIABLES = [
     "mean_surface_downward_long_wave_radiation_flux",
     "mean_surface_downward_short_wave_radiation_flux",
     "mean_surface_downward_short_wave_radiation_flux_clear_sky",
+    "mean_surface_net_long_wave_radiation_flux",
     "mean_surface_latent_heat_flux",
     "mean_surface_sensible_heat_flux",
     "soil_temperature_level_1",
@@ -30,29 +31,6 @@ ERA5_VARIABLES = [
     "friction_velocity"
 ]
 
-COLUMN_NAME_MAPPING = {
-    'CO2_F_MDS': 'CO2',
-    'G_F_MDS':   'G',
-    'H_F_MDS':   'H',
-    'LE_F_MDS':  'LE',
-    'LW_IN_F':   'LW_IN',
-    'LW_OUT':    'LW_OUT',
-    'NETRAD':    'NETRAD',
-    'PA_F':      'PA',
-    'PPFD_IN':   'PPFD_IN',
-    'PPFD_OUT':  'PPFD_OUT',
-    'P_F':       'P',
-    'RH':        'RH',
-    'SW_IN_F':   'SW_IN',
-    'SW_OUT':    'SW_OUT',
-    'TA_F':      'TA',
-    'USTAR':     'USTAR',
-    'VPD_F':     'VPD',
-    'WD':        'WD',
-    'WS_F':      'WS',
-    'timestamp': 'timestamp'
-}
-
 SHORTNAME_TO_FULLNAME = {
     'u10': '10m_u_component_of_wind',
     'v10': '10m_v_component_of_wind',
@@ -63,6 +41,7 @@ SHORTNAME_TO_FULLNAME = {
     'avg_sdlwrf': 'mean_surface_downward_long_wave_radiation_flux',
     'avg_sdswrf': 'mean_surface_downward_short_wave_radiation_flux',
     'avg_sdswrfcs': 'mean_surface_downward_short_wave_radiation_flux_clear_sky',
+    'avg_snlwrf': 'mean_surface_net_long_wave_radiation_flux',
     'avg_slhtf': 'mean_surface_latent_heat_flux',
     'avg_ishf': 'mean_surface_sensible_heat_flux',
     'stl1': 'soil_temperature_level_1',
