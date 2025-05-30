@@ -62,7 +62,7 @@ def run_point_pipeline(file_path: str, coords: list[float], start: str, end: str
     dfpp = postprocess_era5_data(df.drop(columns=['year', 'month', 'day', 'time']), preds, unzip_sub_fldrs)
     print(f"\n{dfpp}")
 
-    dfpp.to_csv('out.csv')
+    return dfpp
 
 
 def run_area_pipeline(coords: list[float], start: str, end: str, preds: list[str], vars_: list[str]):
@@ -98,20 +98,22 @@ def run_area_pipeline(coords: list[float], start: str, end: str, preds: list[str
     start_d = time.time()
     unzip_sub_fldrs = multiprocessing_download(groups, vars_, coords)
     end_d = time.time()
-    print(f"Time taken to download: {end_d - start_d}")
+    print(f"\nTime taken to download: {end_d - start_d}")
 
+    start_m = time.time()
     dfm = merge_datasets(unzip_sub_fldrs) 
+    end_m = time.time()
     print(f"\n{dfm}")
+    print(f"Time taken to merge the NetCDF files: {end_m - start_m}")
 
-    out_df = pd.DataFrame(index=dfm.index)
-    for pred in preds:
-        out_df[pred] = convert_ameriflux_to_era5(dfm, pred)
-
+    start_c = time.time()
+    d = { pred: convert_ameriflux_to_era5(dfm, pred) for pred in preds }
+    out_df = pd.DataFrame(d, index=dfm.index)
+    end_c = time.time()
     print(f"\n{out_df}")
-    start_w = time.time()
-    out_df.to_csv('out.csv')
-    end_w = time.time()
-    print(f"Time taken to write in the CSV: {end_w - start_w}")
+    print(f"Time taken to create the new dataframe: {end_c - start_c}")
+
+    return out_df
 
 
 def multiprocessing_download(groups: list[tuple], vars_: list[str], coords: list[float]) -> list[str]:
@@ -400,10 +402,12 @@ def convert_ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.ndarray:
     cols = VARIABLES_FOR_PREDICTOR[pred]     
     func = PROCESSORS.get(pred)
 
+    arr = df[cols].to_numpy(dtype=float)
+
     if func is None:
-        return df[cols[0]].to_numpy()
+        return arr[:, 0]
     
-    return df[cols].apply(lambda row: func(*row), axis=1).to_numpy()
+    return func(*[arr[:, i] for i in range(arr.shape[1])])
 
 
 def main():
@@ -414,6 +418,7 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--output-format", required=True, choices=['csv', 'netcdf'], help="Desired output format")
 
     # -----------------
     # Subcommand: point
@@ -462,19 +467,34 @@ def main():
                 my_set.add(var)                             
         vars_ = list(my_set)
 
+
     if args.command == 'point':
         print(f"------------------- Inputs -------------------")
         print(f"File: {args.file}")
         print(f"Latitude/longitude: {args.coords}")
         print(f"Start date: {args.start}, End date: {args.end}")
-        print(f"Predictors: {args.preds}\n")
-        run_point_pipeline(args.file, args.coords, args.start, args.end, args.preds, vars_)
+        print(f"Predictors: {args.preds}")
+        print(f"-----------------------------------------------\n")
+        df = run_point_pipeline(args.file, args.coords, args.start, args.end, args.preds, vars_)
     elif args.command == 'area':
         print(f"------------------- Inputs -------------------")
         print(f"Area: {args.coords}")
         print(f"Start date: {args.start}, End date: {args.end}")
-        print(f"Predictors: {args.preds}\n")
-        run_area_pipeline(args.coords, args.start, args.end, args.preds, vars_)
+        print(f"Predictors: {args.preds}")
+        print(f"-----------------------------------------------\n")
+        df = run_area_pipeline(args.coords, args.start, args.end, args.preds, vars_)
+
+    start = time.time()
+
+    if args.output_format == 'csv':
+        df.to_csv('out.csv')
+    elif args.output_format == 'netcdf':
+        ds = df.to_xarray()
+        ds.to_netcdf('out.nc', format='NETCDF4', engine='netcdf4')
+
+    end = time.time()
+    print(f"Time taken to write in the {args.output_format.upper()} file: {end - start}")
+
 
 
 if __name__ == "__main__":
