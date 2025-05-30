@@ -1,7 +1,7 @@
 # carbonpipeline/cli.py
 import argparse
 import re
-import os, shutil, time
+import os, shutil, time, glob
 from datetime import datetime
 
 from concurrent.futures import ProcessPoolExecutor
@@ -320,21 +320,18 @@ def merge_datasets(sub_fldrs: list[str]) -> pd.DataFrame:
     pd.DataFrame
         The merged DataFrame after processing all NetCDF files.
     """
-    dfs = []
+    paths = []
     for fldr in sub_fldrs:
-        sub_dfs = []
-        # source: https://www.geeksforgeeks.org/python-loop-through-folders-and-files-in-directory/
-        for name in os.listdir(fldr):                                                       
-            if name.endswith('.nc'):
-                path_to_file = os.path.join(fldr, name)
-                ds = xr.open_dataset(path_to_file, engine='netcdf4', decode_timedelta=True)
-                df = ds.to_dataframe()
-                sub_dfs.append(df)
-        dfs.append(pd.concat(sub_dfs, axis=1))
+        paths.extend(glob.glob(os.path.join(fldr, "*.nc")))
 
-    combined = pd.concat(dfs, axis=0)
+    ds = xr.open_mfdataset(
+        paths,
+        engine="netcdf4",
+        combine="by_coords",
+        chunks={"time": 1}
+    )
 
-    return apply_column_rename(combined).drop(columns=['number', 'expver'])
+    return apply_column_rename(ds.to_dataframe()).drop(columns=['number', 'expver'])
 
 
 def apply_column_rename(df: pd.DataFrame) -> pd.DataFrame:
@@ -406,7 +403,7 @@ def convert_ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.ndarray:
 
     if func is None:
         return arr[:, 0]
-    
+
     return func(*[arr[:, i] for i in range(arr.shape[1])])
 
 
