@@ -1,6 +1,8 @@
 # carbonpipeline/cli.py
 import argparse
+import json
 import re
+import sys
 import os, shutil, time, glob
 from datetime import datetime
 
@@ -20,6 +22,7 @@ MAX_WORKERS = 4
 ZIP_DIR = "./datasets/zip"
 UNZIP_DIR = "./datasets/unzip"
 DATETIME_FORMAT = r"\d{4}-\d{2}-\d{2} \d{2}:00:00"
+OUTPUT_MANIFEST = "./manifest.json"
 
 
 def run_point_pipeline(file_path: str, coords: list[float], start: str, end: str, preds: list[str], vars_: list[str]):
@@ -65,7 +68,7 @@ def run_point_pipeline(file_path: str, coords: list[float], start: str, end: str
     return dfpp
 
 
-def run_area_pipeline(coords: list[float], start: str, end: str, preds: list[str], vars_: list[str]):
+def run_area_download(coords: list[float], start: str, end: str, preds: list[str], vars_: list[str]):
     """
     Downloads ERA5 datasets based on a geographical bounding box and creates a CSV file that contains
     the desired predictors computed from the requested variables.
@@ -99,6 +102,25 @@ def run_area_pipeline(coords: list[float], start: str, end: str, preds: list[str
     unzip_sub_fldrs = multiprocessing_download(groups, vars_, coords)
     end_d = time.time()
     print(f"\nTime taken to download: {end_d - start_d}")
+
+    os.makedirs(os.path.dirname(OUTPUT_MANIFEST), exist_ok=True)
+    with open(OUTPUT_MANIFEST, 'w') as fp:
+        json.dump(
+            {
+                "preds": preds,
+                "unzip_sub_folders": unzip_sub_fldrs
+            },
+            fp,
+            indent=2
+        )
+
+
+def run_area_process() -> pd.DataFrame:
+    with open(OUTPUT_MANIFEST, "r") as fp:
+        manifest = json.load(fp)
+
+    preds = manifest["preds"]
+    unzip_sub_fldrs = manifest["unzip_sub_folders"]
 
     start_m = time.time()
     dfm = merge_datasets(unzip_sub_fldrs) 
@@ -330,6 +352,7 @@ def merge_datasets(sub_fldrs: list[str]) -> pd.DataFrame:
         combine="by_coords",
         chunks={"time": 1}
     )
+    print(f"ITS NOT THE MERGING WHO FAILS, BUT THE CONVERSION TO DATAFRAME.")
 
     return apply_column_rename(ds.to_dataframe()).drop(columns=['number', 'expver'])
 
@@ -415,7 +438,6 @@ def main():
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    parser.add_argument("--output-format", required=True, choices=['csv', 'netcdf'], help="Desired output format")
 
     # -----------------
     # Subcommand: point
@@ -423,6 +445,7 @@ def main():
     point_parser = subparsers.add_parser(
         name="point", description="Run pipeline for a specific point (lat/lon)"
     )
+    point_parser.add_argument("--output-format", required=True, choices=['csv', 'netcdf'], help="Desired output format")
     point_parser.add_argument("--file", required=True, type=str, help="Path to the dataset file")
     point_parser.add_argument("--coords", required=True, nargs=2, type=float, metavar=("LAT", "LON"), help="Latitude and longitude coordinates")
     point_parser.add_argument("--start", required=True, type=str, help="Start date (YYYY-MM-DDTHH:MM:SS)")
@@ -433,53 +456,82 @@ def main():
     # Subcommand: area
     # ----------------
     area_parser = subparsers.add_parser(
-        name="area", description="Run pipeline for a geographical area (N W S E)"
+        name="area",
+        help="Work with data over a bounding box in two stages (download / process)",
+        epilog="There is two options here because the process can sometimes fail if large datasets were downloaded."
     )
-    area_parser.add_argument("--coords", required=True, nargs=4, type=float, metavar=('NORTH', 'WEST', 'SOUTH', 'EAST'), help="Geographical bounding box")
-    area_parser.add_argument("--start", required=True, type=str, help="Start date (YYYY-MM-DDTHH:MM:SS)")
-    area_parser.add_argument("--end", required=True, type=str, help="End date (YYYY-MM-DDTHH:MM:SS)")
-    area_parser.add_argument("--preds", required=False, nargs='*', help="List of predictors (e.g., TA RH CO2)")
+    area_actions = area_parser.add_subparsers(
+        dest="action",
+        required=True,
+        help="Choose either 'download' or 'process' for area"
+    )
+    # --------------------------
+    # Subcommand: area, download
+    # --------------------------
+    area_download = area_actions.add_parser(
+        "download",
+        help="Download ERA5 files for a bounding box (N W S E)"
+    )
+    area_download.add_argument("--coords", required=True, nargs=4, type=float, metavar=('NORTH', 'WEST', 'SOUTH', 'EAST'), help="Geographical bounding box")
+    area_download.add_argument("--start", required=True, type=str, help="Start date (YYYY-MM-DDTHH:MM:SS)")
+    area_download.add_argument("--end", required=True, type=str, help="End date (YYYY-MM-DDTHH:MM:SS)")
+    area_download.add_argument("--preds", required=False, nargs='*', help="List of predictors (e.g., TA RH CO2)")
+    # -------------------------
+    # Subcommand: area, process
+    # -------------------------
+    area_process = area_actions.add_parser(
+        "process",
+        help="Process previously downloaded ERA5 folders for a bounding box"
+    )
+    area_process.add_argument("--output-format", required=True, choices=['csv', 'netcdf'], help="Desired output format")
 
     args = parser.parse_args()
 
-    args.start = ' '.join(args.start.split('T'))
-    args.end = ' '.join(args.end.split('T'))
+    if not args.action == 'process':
+        args.start = ' '.join(args.start.split('T'))
+        args.end = ' '.join(args.end.split('T'))
 
-    if args.preds is not None:
-        invalid = []
-        VALID_PREDICTORS = list(VARIABLES_FOR_PREDICTOR.keys())
-        for pred in args.preds:
-            if pred not in VALID_PREDICTORS:
-                invalid.append(pred)
-        if invalid:
-            parser.error(f"\nInvalid predictor(s): {', '.join(invalid)} \nValid options are: {', '.join(VALID_PREDICTORS)}")
-    
-    my_set = set()
-    if args.preds is None:
-        vars_ = ERA5_VARIABLES
-        args.preds = list(VARIABLES_FOR_PREDICTOR.keys())
-    else:
-        for pred in args.preds:
-            for var in VARIABLES_FOR_PREDICTOR[pred]:
-                my_set.add(var)                             
-        vars_ = list(my_set)
+        if args.preds is not None:
+            invalid = []
+            VALID_PREDICTORS = list(VARIABLES_FOR_PREDICTOR.keys())
+            for pred in args.preds:
+                if pred not in VALID_PREDICTORS:
+                    invalid.append(pred)
+            if invalid:
+                parser.error(f"\nInvalid predictor(s): {', '.join(invalid)} \nValid options are: {', '.join(VALID_PREDICTORS)}")
+        
+        my_set = set()
+        if args.preds is None:
+            vars_ = ERA5_VARIABLES
+            args.preds = list(VARIABLES_FOR_PREDICTOR.keys())
+        else:
+            for pred in args.preds:
+                for var in VARIABLES_FOR_PREDICTOR[pred]:
+                    my_set.add(var)                             
+            vars_ = list(my_set)
 
 
-    if args.command == 'point':
-        print(f"------------------- Inputs -------------------")
-        print(f"File: {args.file}")
-        print(f"Latitude/longitude: {args.coords}")
-        print(f"Start date: {args.start}, End date: {args.end}")
-        print(f"Predictors: {args.preds}")
-        print(f"-----------------------------------------------\n")
-        df = run_point_pipeline(args.file, args.coords, args.start, args.end, args.preds, vars_)
-    elif args.command == 'area':
-        print(f"------------------- Inputs -------------------")
-        print(f"Area: {args.coords}")
-        print(f"Start date: {args.start}, End date: {args.end}")
-        print(f"Predictors: {args.preds}")
-        print(f"-----------------------------------------------\n")
-        df = run_area_pipeline(args.coords, args.start, args.end, args.preds, vars_)
+        if args.command == 'point':
+            print(f"------------------- Inputs -------------------")
+            print(f"File: {args.file}")
+            print(f"Latitude/longitude: {args.coords}")
+            print(f"Start date: {args.start}, End date: {args.end}")
+            print(f"Predictors: {args.preds}")
+            print(f"-----------------------------------------------\n")
+            df = run_point_pipeline(args.file, args.coords, args.start, args.end, args.preds, vars_)
+        elif args.command == 'area':
+            print(f"------------------- Inputs -------------------")
+            print(f"Area: {args.coords}")
+            print(f"Start date: {args.start}, End date: {args.end}")
+            print(f"Predictors: {args.preds}")
+            print(f"-----------------------------------------------\n")
+
+            if args.action == 'download':
+                run_area_download(args.coords, args.start, args.end, args.preds, vars_)
+                print(f"The downloads have been done and the manifest have been written, you can now proceed to the process phase.")
+                sys.exit(0)
+    elif args.action == 'process':
+        df = run_area_process()
 
     start = time.time()
 
