@@ -510,7 +510,6 @@ def main():
                     my_set.add(var)                             
             vars_ = list(my_set)
 
-
         if args.command == 'point':
             print(f"------------------- Inputs -------------------")
             print(f"File: {args.file}")
@@ -525,11 +524,9 @@ def main():
             print(f"Start date: {args.start}, End date: {args.end}")
             print(f"Predictors: {args.preds}")
             print(f"-----------------------------------------------\n")
-
-            if args.action == 'download':
-                run_area_download(args.coords, args.start, args.end, args.preds, vars_)
-                print(f"The downloads have been done and the manifest have been written, you can now proceed to the process phase.")
-                sys.exit(0)
+            run_area_download(args.coords, args.start, args.end, args.preds, vars_)
+            print(f"The downloads have been done and the manifest have been written, you can now proceed to the process phase.")
+            sys.exit(0)
     elif args.action == 'process':
         df = run_area_process()
 
