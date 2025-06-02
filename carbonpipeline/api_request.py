@@ -22,13 +22,13 @@ class APIRequest:
     vars : list[str) | None 
         Optional list of high-level variables under ERA5 long version naming.
     """
-    def __init__(self, year: str, month: str, day: str, time: str, coords: list[float], vars: list[str]):
+    def __init__(self, year: str, month: str, day: str, time: str, coords: list[float], vars_: list[str]):
         self.year = year
         self.month = month
         self.day = day
         self.time = time
         self.coords = coords
-        self.vars = vars
+        self.vars = vars_
         self.area = None
 
     def query(self, ZIP_DIR: str):
