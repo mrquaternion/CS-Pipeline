@@ -3,6 +3,7 @@ Containers
 carbonpipeline.egg-info
 carbonpipeline/__pycache__/*
 datasets/
+outputs/
 notebook.ipynb
 out.csv
 predictors.csv
