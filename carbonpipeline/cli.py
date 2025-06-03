@@ -1,15 +1,9 @@
 # carbonpipeline/cli.py
-import argparse
-import json
-import re
-import os, shutil, glob
+import os, shutil, glob, re, json, argparse, zipfile
 from datetime import datetime
-
-from concurrent.futures import ProcessPoolExecutor
-from functools import partial
-import zipfile
-
+from timezonefinder import TimezoneFinder
 from tqdm import tqdm
+
 from carbonpipeline.processing_utils import *
 from carbonpipeline.constants import *
 from carbonpipeline.api_request import APIRequest
@@ -17,11 +11,11 @@ import xarray as xr
 import pandas as pd
 
 
-MAX_WORKERS     = 4
 ZIP_DIR         = "./datasets/zip"
 UNZIP_DIR       = "./datasets/unzip"
 DATETIME_FMT    = r"\d{4}-\d{2}-\d{2} \d{2}:00:00"
 OUTPUT_MANIFEST = "./manifest.json"
+TZ_FINDER       = TimezoneFinder()
 
 
 def run_point_download(file_path: str, coords: list[float], 
@@ -59,7 +53,10 @@ def run_point_download(file_path: str, coords: list[float],
         List of the corresponding ERA5 variables to query.
     """
     df         = _load_and_filter_dataframe(file_path, start, end)
-    groups     = _missing_groups(df)
+    print(df)
+    dftz       = _adjust_timezone(df, coords)
+    print(dftz)
+    groups     = _missing_groups(dftz, coords)
     unzip_dirs = _download_groups(groups, vars_, coords)
     return _run_point_process(df.drop(columns=["year", "month", "day", "time"]), 
                               preds, unzip_dirs)
@@ -141,14 +138,19 @@ def convert_ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.ndarray:
     return func(*[arr[:, i] for i in range(arr.shape[1])])
     
 
-def _load_and_filter_dataframe(path: str, start: str, end: str):
+def _load_and_filter_dataframe(path: str, start: str, end: str) -> pd.DataFrame:
     df              = pd.read_csv(path)
-    df["timestamp"] = df["timestamp"].apply(_validate_date_format).pipe(pd.to_datetime)                 
+    df["timestamp"] = df["timestamp"].apply(_validate_date_format).pipe(pd.to_datetime)         
+    df              = df[(df["timestamp"].dt.minute == 0) & (df["timestamp"].dt.second == 0)]
 
-    df = df[(df["timestamp"].dt.minute == 0) & (df["timestamp"].dt.second == 0)]
-    df = df[df["timestamp"].between(pd.to_datetime(start), pd.to_datetime(end))]
+    min_ts, max_ts   = df["timestamp"].min(), df["timestamp"].max()
+    start_ts, end_ts = pd.to_datetime(start), pd.to_datetime(end)
 
-    return _find_missing_rows(df)
+    if start_ts < min_ts or end_ts > max_ts:
+        msg = (f"The requested interval [{start_ts} -> {end_ts}] "
+               f"is out of bound for the given CSV file [{min_ts} -> {max_ts}].")
+        raise ValueError(msg)
+    return _find_missing_rows(df[df["timestamp"].between(pd.to_datetime(start), pd.to_datetime(end))])
 
 
 def _validate_date_format(ts: str | int) -> str:
@@ -187,7 +189,15 @@ def _find_missing_rows(df: pd.DataFrame) -> pd.DataFrame:
     return miss
 
 
-def _missing_groups(df: pd.DataFrame) -> list[tuple]:
+def _adjust_timezone(df: pd.DataFrame, coords: list[float]):
+    dftz              = df.copy()
+    tz                = TZ_FINDER.timezone_at(lat=coords[0], lng=coords[1])
+    dftz["timestamp"] = dftz["timestamp"].dt.tz_localize("UTC")
+    dftz["timestamp"] = dftz["timestamp"].dt.tz_convert(tz)
+    return dftz
+
+
+def _missing_groups(df: pd.DataFrame, coords: list[float]) -> list[tuple]:
     return [g for g, _ in df.groupby(["year", "month", "day", "time"])]
 
 
@@ -200,14 +210,14 @@ def _hourly_groups(start: str, end: str) -> list[tuple]:
 def _download_groups(groups: list[tuple], vars_: list[str], 
                      coords: list[float]) -> list[str]:
     _setup_dirs(ZIP_DIR, UNZIP_DIR)
+
     fldrs = [] 
-    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as ex:    
-        for fname in ex.map(partial(_prepare_request, 
-                                    dir_=ZIP_DIR, coords=coords, vars_=vars_), groups):
-            zip_fp   = f"{ZIP_DIR}/{fname}"
-            unzip_fp = f"{UNZIP_DIR}/{fname.split('.')[0]}"
-            fldrs.append(unzip_fp)
-            _extract_zip(zip_fp, unzip_fp)
+    for group in tqdm(groups, desc="Number of hours downloaded", unit="hours", colour="green"):
+        fname    = _prepare_request(group, ZIP_DIR, coords, vars_)
+        zip_fp   = f"{ZIP_DIR}/{fname}"
+        unzip_fp = f"{UNZIP_DIR}/{fname.split('.')[0]}"
+        fldrs.append(unzip_fp)
+        _extract_zip(zip_fp, unzip_fp)
     return fldrs
 
 
@@ -251,14 +261,12 @@ def _extract_zip(zip_fp: str, unzip_fp: str):
     unzip_path : str
         The directory where the contents will be extracted.
     """
-    print(f"Unzipping the file")
     with zipfile.ZipFile(zip_fp, "r") as z:
-        for member in tqdm(z.infolist(), desc="Extracting "):
-            try: 
-                z.extractall(unzip_fp)
-            except zipfile.error as e: 
-                pass
-    os.remove(zip_fp)
+        try: 
+            z.extractall(unzip_fp)
+            os.remove(zip_fp)
+        except zipfile.error as e: 
+            print(f"Failed to extract {zip_fp}: {e}")
 
 
 def _run_point_process(df: pd.DataFrame, preds: list[str], 
