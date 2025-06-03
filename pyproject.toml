@@ -10,7 +10,8 @@ dependencies = [
     "eccodes",
     "pandas",
     "ipykernel",
-    "netCDF4"
+    "netCDF4",
+    "timezonefinder"
 ]
 
 [project.scripts]
