@@ -21,15 +21,13 @@ Currently, the pipeline only works with the following AMERIFLUX predictors:
 - WD 
 - USTAR 
 - NETRAD 
-- SW_IN 
-- SW_IN_POT 
-- SW_OUT 
-- LW_IN 
-- LW_OUT 
+- SW_IN, SW_IN_POT, SW_OUT 
+- LW_IN, LW_OUT 
 - LE 
 - G 
 - H 
 - VPD 
 - RH
+- PPFD_IN, PPFD_OUT
 - SWC_1, SWC_2, SWC_3, SWC_4, SWC_5 (values may not be currently accurate)
 - TS_1, TS_2, TS_3, TS_4, TS_5 (values may not be currently accurate)
