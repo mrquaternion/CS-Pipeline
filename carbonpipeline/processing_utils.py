@@ -101,6 +101,16 @@ def soil_heat_flux(avg_ishf, avg_slhtf, avg_sdswrf, avg_sdlwrf, avg_snlwrf, fal)
     return NETRAD - avg_ishf - avg_slhtf
 
 
+def photosynthesis_photo_flux_density(avg_sdswrf, fal=None):
+    # SWintoPPFD.m mathlab document by Gabriel Hould Gosselin B.ing M.Sc
+    return (
+        (1.741 * avg_sdswrf + 1.45)
+        if fal is None
+        else
+        (1.741 * avg_sdswrf * fal + 1.45)
+    )              
+
+
 PROCESSORS = {
     'RH': relative_humidity,
     'VPD': vapor_pressure_deficit,
@@ -122,6 +132,8 @@ PROCESSORS = {
     'SWC_3': lambda x: x * 100,
     'SWC_4': lambda x: x * 100,
     'SWC_5': lambda x: x * 100,
+    'PPFD_IN': photosynthesis_photo_flux_density,
+    'PPFD_OUT': photosynthesis_photo_flux_density 
 }
 
 VARIABLES_FOR_PREDICTOR = {
@@ -130,7 +142,7 @@ VARIABLES_FOR_PREDICTOR = {
     "RH":        ['2m_temperature', '2m_dewpoint_temperature'],
     "VPD":       ['2m_temperature', '2m_dewpoint_temperature'],
     "PA":        ['surface_pressure'],
-    # "CO2":       ['2m_temperature', '2m_dewpoint_temperature', 'surface_pressure'], # Make another request to https://cds.climate.copernicus.eu/datasets/satellite-carbon-dioxide?tab=overview
+    "CO2":       ['2m_temperature', '2m_dewpoint_temperature', 'surface_pressure'],
     "SW_IN":     ['mean_surface_downward_short_wave_radiation_flux'],
     "SW_IN_POT": ['mean_surface_downward_short_wave_radiation_flux_clear_sky'],
     "SW_OUT":    ['mean_surface_downward_short_wave_radiation_flux', 'forecast_albedo'],
@@ -150,8 +162,9 @@ VARIABLES_FOR_PREDICTOR = {
     "TS_3":      ['soil_temperature_level_2'],
     "TS_4":      ['soil_temperature_level_2'],
     "TS_5":      ['soil_temperature_level_3'],
-    # "WTD":       [''], Make another request to https://github.com/UU-Hydro/GLOBGM 
     "G":         ['mean_surface_sensible_heat_flux', 'mean_surface_latent_heat_flux', 'mean_surface_downward_short_wave_radiation_flux', 'mean_surface_downward_long_wave_radiation_flux', 'mean_surface_net_long_wave_radiation_flux','forecast_albedo'],
     "H":         ['mean_surface_sensible_heat_flux'],
-    "LE":        ['mean_surface_latent_heat_flux']
+    "LE":        ['mean_surface_latent_heat_flux'],
+    "PPFD_IN":   ['mean_surface_downward_short_wave_radiation_flux'],
+    "PPFD_OUT":   ['mean_surface_downward_short_wave_radiation_flux', 'forecast_albedo']
 }
