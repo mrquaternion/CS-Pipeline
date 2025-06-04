@@ -18,9 +18,9 @@ OUTPUT_MANIFEST = "./manifest.json"
 TZ_FINDER       = TimezoneFinder()
 
 
-def run_point_download(file_path: str, coords: list[float], 
-                       start: str, end: str, 
-                       preds: list[str], vars_: list[str]) -> pd.DataFrame:
+def run_point_download(file_path: str, format: str,
+                       coords: list[float], start: str, end: str, 
+                       preds: list[str], vars_: list[str]):
     """
     Processes a CSV file containing climate or environmental data, identifies missing data points,
     and downloads the corresponding ERA5 datasets for those points using multiprocessing.
@@ -41,6 +41,8 @@ def run_point_download(file_path: str, coords: list[float],
     ----------
     file : str 
         Path to the input CSV file.
+    format : str
+        Desired format for the output file.
     coords : list[float] 
         Latitude and longitude coordinates.
     start: str
@@ -53,13 +55,12 @@ def run_point_download(file_path: str, coords: list[float],
         List of the corresponding ERA5 variables to query.
     """
     df         = _load_and_filter_dataframe(file_path, start, end)
-    print(df)
     dftz       = _adjust_timezone(df, coords)
-    print(dftz)
     groups     = _missing_groups(dftz, coords)
     unzip_dirs = _download_groups(groups, vars_, coords)
-    return _run_point_process(df.drop(columns=["year", "month", "day", "time"]), 
-                              preds, unzip_dirs)
+    df_out     = _run_point_process(df.drop(columns=["year", "month", "day", "time"]), 
+                                    preds, unzip_dirs)
+    _save_output(format, df_out)
 
 
 def run_area_download(coords: list[float], 
@@ -247,7 +248,7 @@ def _prepare_request(group: tuple, dir_: str,
     request = APIRequest(year=str(Y), month=f"{int(M):02d}", day=f"{int(D):02d}",
                          time=re.search(r"\d{2}:00", t).group(),
                          coords=coords, vars_=vars_)
-    return request.query(dir_)
+    return request.query_era5(dir_)
 
 
 def _extract_zip(zip_fp: str, unzip_fp: str):
@@ -326,9 +327,21 @@ def _merge_unzipped(dirs: list[str]) -> xr.Dataset:
     pd.DataFrame
         The merged DataFrame after processing all NetCDF files.
     """
-    paths = [p for d in dirs for p in glob.glob(os.path.join(d, "*.nc"))]
+    paths = [
+        p 
+        for d in dirs 
+        for p in glob.glob(os.path.join(d, "*.nc"))
+    ]
     return xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords",
                              chunks={"time": "auto"}, drop_variables=["number", "expver"])
+
+
+def _save_output(format: str, df: pd.DataFrame):
+    if format == "csv":
+        df.to_csv("out.csv")
+    else:
+        (df.to_xarray()
+           .to_netcdf("out.nc", format="NETCDF4", engine="netcdf4"))
 
 
 def _write_chunks(ds: xr.Dataset, preds: list[str]) -> str:
@@ -433,25 +446,40 @@ def _add_area_subparser(subparsers):
 
 def _validate_and_prepare(args, parser):
     args.start = ' '.join(args.start.split("T"))
-    args.end = ' '.join(args.end.split("T"))
+    args.end   = ' '.join(args.end.split("T"))
+
+    needs_wtd = False
+    needs_co2 = False
+    for pred in args.preds:
+        if pred == "WTD": # Only variable that don't need ERA5 variables
+            args.preds.remove("WTD")
+            needs_wtd = True
+        if pred == "CO2":
+            needs_co2 = True
 
     if args.preds is not None:
-        invalid = [p for p in args.preds if p not in VARIABLES_FOR_PREDICTOR]
+        invalid = [
+            p 
+            for p in args.preds 
+            if p not in VARIABLES_FOR_PREDICTOR
+        ]
         if invalid:
             parser.error(
                 f"\nInvalid predictor(s): {', '.join(invalid)}\n"
                 f"Valid options are: {', '.join(VARIABLES_FOR_PREDICTOR)}"
             )
-    
-    if args.preds is None:
+
+        needed = {
+            var
+            for pred in args.preds
+            for var in VARIABLES_FOR_PREDICTOR[pred]
+        }
+        vars_ = list(needed)  
+    else:
         vars_ = ERA5_VARIABLES
         args.preds = list(VARIABLES_FOR_PREDICTOR)
-    else:
-        needed = {var
-                  for pred in args.preds
-                  for var in VARIABLES_FOR_PREDICTOR[pred]}
-        vars_ = list(needed)
-    return vars_
+
+    return vars_, needs_wtd, needs_co2 
 
 
 def _pretty_print_inputs(title: str, **fields):
@@ -469,28 +497,22 @@ def main():
         run_area_process(args.name)
         return
         
-    vars_ = _validate_and_prepare(args, parser)
+    vars_, needs_wtd, needs_co2 = _validate_and_prepare(args, parser)
 
     if args.command == "point":
         _pretty_print_inputs(
             "Inputs", File=args.file, Coordinates=args.coords,
             Start = args.start, End = args.end, Predictors=args.preds
         )
-        df = run_point_download(args.file, args.coords, args.start, args.end, args.preds, vars_)
-        if args.output_format == "csv":
-            df.to_csv("out.csv")
-        else:
-            df.to_xarray().to_netcdf("out.nc", format="NETCDF4", engine="netcdf4")
-
+        run_point_download(args.file, args.output_format, args.coords, args.start, args.end, args.preds, vars_)
     elif args.command == "area" and args.action == "download":
         _pretty_print_inputs(
             "Inputs", Area=args.coords, Start = args.start, 
             End = args.end, Predictors=args.preds
         )
         run_area_download(args.coords, args.start, args.end, args.preds, vars_)
-
         print("The downloads are complete and the manifest is written; you can now proceed to the process phase.")
 
-
+oom
 if __name__ == "__main__":
     main()
