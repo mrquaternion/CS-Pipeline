@@ -513,6 +513,6 @@ def main():
         run_area_download(args.coords, args.start, args.end, args.preds, vars_)
         print("The downloads are complete and the manifest is written; you can now proceed to the process phase.")
 
-oom
+
 if __name__ == "__main__":
     main()
