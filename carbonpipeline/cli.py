@@ -130,7 +130,8 @@ def convert_ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.ndarray:
     - If a processing function is defined in PROCESSORS for the predictor, it is applied row-wise.
     - If no processing function is found, the first relevant column is returned as a NumPy array.
     """
-    cols = VARIABLES_FOR_PREDICTOR[pred]     
+    reverse_variable_lookup = {v: k for k, v in SHORTNAME_TO_FULLNAME.items()}
+    cols = [reverse_variable_lookup[c] for c in VARIABLES_FOR_PREDICTOR[pred]]
     func = PROCESSORS.get(pred)
     arr  = df[cols].to_numpy(dtype=float)
 
@@ -262,9 +263,9 @@ def _extract_zip(zip_fp: str, unzip_fp: str):
     unzip_path : str
         The directory where the contents will be extracted.
     """
-    with zipfile.ZipFile(zip_fp, "r") as z:
+    with zipfile.ZipFile(zip_fp, "r") as zp:
         try: 
-            z.extractall(unzip_fp)
+            zp.extractall(unzip_fp)
             os.remove(zip_fp)
         except zipfile.error as e: 
             print(f"Failed to extract {zip_fp}: {e}")
@@ -336,6 +337,10 @@ def _merge_unzipped(dirs: list[str]) -> xr.Dataset:
                              chunks={"time": "auto"}, drop_variables=["number", "expver"])
 
 
+def _add_co2_column():
+    pass
+
+
 def _save_output(format: str, df: pd.DataFrame):
     if format == "csv":
         df.to_csv("out.csv")
@@ -350,7 +355,7 @@ def _write_chunks(ds: xr.Dataset, preds: list[str]) -> str:
     os.makedirs(tmp_dir, exist_ok=True)
 
     for i in tqdm(range(ds.sizes['valid_time'])):
-        chunk_df = ds.isel(valid_time=i).to_dataframe()
+        chunk_df = ds.isel(valid_time=slice(i, i + 1)).to_dataframe()
         lookup   = {p: convert_ameriflux_to_era5(chunk_df, p) for p in preds}
         (pd.DataFrame(lookup, index=chunk_df.index)
            .to_xarray()
@@ -361,9 +366,9 @@ def _write_chunks(ds: xr.Dataset, preds: list[str]) -> str:
 
 def _concat_chunks(tmp_dir: str, final_out: str):
     paths = glob.glob(os.path.join(tmp_dir, "*.nc"))
-    xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords", 
-                      chunks={"time": "auto"}, drop_variables=["number", "expver"]
-    ).to_netcdf(final_out, mode="w", format="NETCDF4", engine="netcdf4")
+    ds    = xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords", 
+                              chunks={"time": "auto"}, drop_variables=["number", "expver"])
+    ds.to_netcdf(final_out, mode="w", format="NETCDF4", engine="netcdf4")
 
 
 def _apply_column_rename(obj: pd.DataFrame | xr.Dataset) -> pd.DataFrame | xr.Dataset:
