@@ -3,6 +3,10 @@ import os
 import cdsapi
 from carbonpipeline.constants import *
 
+
+CO2_FOLDERNAME = "CO2_2003-2022"
+
+
 class APIRequest:
     """
     Represents a request to the ERA5 dataset for a specific date, location and set of variables.
@@ -65,9 +69,22 @@ class APIRequest:
 
         return filename
     
+    @classmethod
+    def query_co2(self, zip_dir: str):
+        dataset = "satellite-carbon-dioxide"
+        request = {
+            "processing_level": ["level_3"],
+            "variable": "xco2",
+            "sensor_and_algorithm": "merged_obs4mips",
+            "version": ["4_5"]
+        }
 
-    def query_co2(self):
-        pass
+        client = cdsapi.Client()
+        result = client.retrieve(dataset, request)
+
+        target = os.path.join(zip_dir, CO2_FOLDERNAME)
+
+        result.download(target)
 
 
 
