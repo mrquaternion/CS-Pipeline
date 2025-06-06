@@ -10,3 +10,5 @@ predictors.csv
 data.csv
 manifest.json
 out.nc
+unzip/
+test.nc
