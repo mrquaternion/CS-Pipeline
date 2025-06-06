@@ -133,7 +133,8 @@ PROCESSORS = {
     'SWC_4': lambda x: x * 100,
     'SWC_5': lambda x: x * 100,
     'PPFD_IN': photosynthesis_photo_flux_density,
-    'PPFD_OUT': photosynthesis_photo_flux_density 
+    'PPFD_OUT': photosynthesis_photo_flux_density,
+    'CO2': dry_to_wet_co2_fraction
 }
 
 VARIABLES_FOR_PREDICTOR = {
@@ -142,7 +143,7 @@ VARIABLES_FOR_PREDICTOR = {
     "RH":        ['2m_temperature', '2m_dewpoint_temperature'],
     "VPD":       ['2m_temperature', '2m_dewpoint_temperature'],
     "PA":        ['surface_pressure'],
-    "CO2":       ['2m_temperature', '2m_dewpoint_temperature', 'surface_pressure'],
+    "CO2":       ['2m_temperature', '2m_dewpoint_temperature', 'surface_pressure', 'xco2'],
     "SW_IN":     ['mean_surface_downward_short_wave_radiation_flux'],
     "SW_IN_POT": ['mean_surface_downward_short_wave_radiation_flux_clear_sky'],
     "SW_OUT":    ['mean_surface_downward_short_wave_radiation_flux', 'forecast_albedo'],
