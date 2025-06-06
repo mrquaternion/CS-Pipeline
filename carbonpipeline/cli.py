@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from carbonpipeline.processing_utils import *
 from carbonpipeline.constants import *
-from carbonpipeline.api_request import APIRequest
+from carbonpipeline.api_request import *
 import xarray as xr
 import pandas as pd
 
@@ -20,7 +20,8 @@ TZ_FINDER       = TimezoneFinder()
 
 def run_point_download(file_path: str, format: str,
                        coords: list[float], start: str, end: str, 
-                       preds: list[str], vars_: list[str]):
+                       preds: list[str], vars_: list[str], 
+                       needs_wtd: bool, needs_co2: bool):
     """
     Processes a CSV file containing climate or environmental data, identifies missing data points,
     and downloads the corresponding ERA5 datasets for those points using multiprocessing.
@@ -53,13 +54,17 @@ def run_point_download(file_path: str, format: str,
         List of the AmeriFlux predictor names to process.
     vars\_ : list[str]
         List of the corresponding ERA5 variables to query.
+    needs\_wtd : bool
+        Flag indicating the WTD predictor has been requested.
+    needs\_co2d : bool
+        Flag indicating the CO2 predictor has been requested.
     """
     df         = _load_and_filter_dataframe(file_path, start, end)
     dftz       = _adjust_timezone(df, coords)
     groups     = _missing_groups(dftz, coords)
     unzip_dirs = _download_groups(groups, vars_, coords)
     df_out     = _run_point_process(df.drop(columns=["year", "month", "day", "time"]), 
-                                    preds, unzip_dirs)
+                                    preds, unzip_dirs, needs_wtd, needs_co2)
     _save_output(format, df_out)
 
 
@@ -101,7 +106,10 @@ def run_area_download(coords: list[float],
 
 def run_area_process(outfile_name: str):
     preds, unzip_dirs = _load_manifest()
-    merged_ds         = _merge_unzipped(unzip_dirs)
+    merged_ds         = _apply_column_rename(_merge_unzipped(unzip_dirs))
+
+    if os.path.isdir(os.path.join(UNZIP_DIR, CO2_FOLDERNAME)):
+        merged_ds = _add_co2_column(merged_ds)
 
     tmp_dir = _write_chunks(merged_ds, preds)
     _concat_chunks(tmp_dir, outfile_name + ".nc")
@@ -130,8 +138,7 @@ def convert_ameriflux_to_era5(df: pd.DataFrame, pred: str) -> np.ndarray:
     - If a processing function is defined in PROCESSORS for the predictor, it is applied row-wise.
     - If no processing function is found, the first relevant column is returned as a NumPy array.
     """
-    reverse_variable_lookup = {v: k for k, v in SHORTNAME_TO_FULLNAME.items()}
-    cols = [reverse_variable_lookup[c] for c in VARIABLES_FOR_PREDICTOR[pred]]
+    cols = VARIABLES_FOR_PREDICTOR[pred]
     func = PROCESSORS.get(pred)
     arr  = df[cols].to_numpy(dtype=float)
 
@@ -211,16 +218,21 @@ def _hourly_groups(start: str, end: str) -> list[tuple]:
 
 def _download_groups(groups: list[tuple], vars_: list[str], 
                      coords: list[float]) -> list[str]:
-    _setup_dirs(ZIP_DIR, UNZIP_DIR)
-
     fldrs = [] 
     for group in tqdm(groups, desc="Number of hours downloaded", unit="hours", colour="green"):
-        fname    = _prepare_request(group, ZIP_DIR, coords, vars_)
+        fname    = _prepare_group_request(group, ZIP_DIR, coords, vars_)
         zip_fp   = f"{ZIP_DIR}/{fname}"
         unzip_fp = f"{UNZIP_DIR}/{fname.split('.')[0]}"
         fldrs.append(unzip_fp)
         _extract_zip(zip_fp, unzip_fp)
     return fldrs
+
+
+def _download_co2_data():
+    APIRequest.query_co2(ZIP_DIR)
+    zip_fp   = f"{ZIP_DIR}/{CO2_FOLDERNAME}"
+    unzip_fp = f"{UNZIP_DIR}/{CO2_FOLDERNAME.split('.')[0]}"
+    _extract_zip(zip_fp, unzip_fp)
 
 
 def _setup_dirs(*dirs):
@@ -229,7 +241,7 @@ def _setup_dirs(*dirs):
         os.makedirs(d, exist_ok=True)
 
 
-def _prepare_request(group: tuple, dir_: str, 
+def _prepare_group_request(group: tuple, dir_: str, 
                      coords: list[float], vars_: list[str]) -> str:
     """
     Queries data for a specific date and location, then downloads the results.
@@ -271,8 +283,8 @@ def _extract_zip(zip_fp: str, unzip_fp: str):
             print(f"Failed to extract {zip_fp}: {e}")
 
 
-def _run_point_process(df: pd.DataFrame, preds: list[str], 
-                       unzip_dirs: list[str]) -> pd.DataFrame:
+def _run_point_process(df: pd.DataFrame, preds: list[str], unzip_dirs: list[str], 
+                       needs_wtd: bool, needs_co2: bool) -> pd.DataFrame:
     """
     Post-processes ERA5 data by merging datasets, grouping by valid time, and updating a multi-index DataFrame.
 
@@ -284,11 +296,14 @@ def _run_point_process(df: pd.DataFrame, preds: list[str],
         List of prediction variable names to process.
     unzip_dirs : list 
         List of directories containing unzipped ERA5 datasets.
+    needs\_wtd : bool
+        Flag indicating the WTD predictor has been requested.
+    needs\_co2d : bool
+        Flag indicating the CO2 predictor has been requested.
 
     Notes
     -----
     - Merges datasets from the provided directories.
-    - Groups merged data by 'valid_time' and computes the mean.
     - Builds a multi-index DataFrame for the predictions.
     - For each prediction with origin containing 'ERA', updates the corresponding values using ERA5 data.
     """
@@ -337,8 +352,52 @@ def _merge_unzipped(dirs: list[str]) -> xr.Dataset:
                              chunks={"time": "auto"}, drop_variables=["number", "expver"])
 
 
-def _add_co2_column():
-    pass
+def _add_co2_column(ds_era5: xr.Dataset) -> xr.Dataset:
+    ds_co2 = _load_and_clean_co2_dataset()
+    
+    ds_era5 = _add_year_month(ds_era5, "valid_time")
+    ds_co2  = _prepare_co2_dataset(ds_co2)
+
+    ds_era5 = _assign_closest_lat_lon(ds_era5, ds_co2)
+
+    xco2_selected = ds_co2["xco2"].sel(
+        year_month=ds_era5["year_month"],
+        lat=ds_era5["lat"],
+        lon=ds_era5["lon"]
+    )
+
+    ds_era5["xco2"] = (("valid_time", "latitude", "longitude"), xco2_selected.data)
+    return ds_era5.reset_coords(["lat", "lon", "year_month"], drop=True)
+
+
+def _add_year_month(ds: xr.Dataset, time_coord: str) -> xr.Dataset:
+    return ds.assign_coords(year_month=ds[time_coord].astype("datetime64[M]"))
+
+
+def _prepare_co2_dataset(ds_co2: xr.Dataset) -> xr.Dataset:
+    ds_co2 = _add_year_month(ds_co2, "time")
+    ds_co2 = ds_co2.swap_dims({"time": "year_month"})
+    return ds_co2.reset_coords("time", drop=True)
+
+
+def _assign_closest_lat_lon(ds_era5: xr.Dataset, ds_co2: xr.Dataset) -> xr.Dataset:
+    b_lats = np.unique(ds_co2["lat"].values)
+    b_lons = np.unique(ds_co2["lon"].values)
+    
+    return ds_era5.assign_coords(
+        lat=("latitude", match_to_closest(ds_era5["latitude"].values, b_lats)),
+        lon=("longitude", match_to_closest(ds_era5["longitude"].values, b_lons)),
+    )
+
+
+def _load_and_clean_co2_dataset() -> xr.Dataset:
+    ds = xr.open_dataset(glob.glob(os.path.join(UNZIP_DIR, CO2_FOLDERNAME, "*nc"))[0])
+    ds["xco2"] = ds["xco2"].where(ds["xco2"] != np.float32(1e20), np.nan)
+    return ds[["xco2"]]
+
+
+def match_to_closest(values, reference_points):
+    return np.array([reference_points[np.abs(reference_points - v).argmin()] for v in values])
 
 
 def _save_output(format: str, df: pd.DataFrame):
@@ -371,8 +430,13 @@ def _concat_chunks(tmp_dir: str, final_out: str):
     ds.to_netcdf(final_out, mode="w", format="NETCDF4", engine="netcdf4")
 
 
-def _apply_column_rename(obj: pd.DataFrame | xr.Dataset) -> pd.DataFrame | xr.Dataset:
-    return obj.rename(name_dict=SHORTNAME_TO_FULLNAME)
+def _apply_column_rename(ds: xr.Dataset) -> xr.Dataset:
+    rename_dict = {
+        k: v 
+        for k, v in SHORTNAME_TO_FULLNAME.items() 
+        if k in ds.data_vars
+    }
+    return ds.rename(rename_dict)
 
 
 def _build_multiindex_dataframe(df: pd.DataFrame, preds: list[str]) -> pd.DataFrame:
@@ -504,12 +568,20 @@ def main():
         
     vars_, needs_wtd, needs_co2 = _validate_and_prepare(args, parser)
 
+    if needs_co2:
+        _download_co2_data()
+    if needs_wtd:
+        pass
+
+    _setup_dirs(ZIP_DIR, UNZIP_DIR)
+
     if args.command == "point":
         _pretty_print_inputs(
             "Inputs", File=args.file, Coordinates=args.coords,
             Start = args.start, End = args.end, Predictors=args.preds
         )
-        run_point_download(args.file, args.output_format, args.coords, args.start, args.end, args.preds, vars_)
+        run_point_download(args.file, args.output_format, args.coords, args.start, args.end, 
+                           args.preds, vars_, needs_wtd, needs_co2)
     elif args.command == "area" and args.action == "download":
         _pretty_print_inputs(
             "Inputs", Area=args.coords, Start = args.start, 
