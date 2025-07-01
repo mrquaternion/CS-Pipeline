@@ -38,6 +38,10 @@ The code from one's dataset will pack the data in a `.zip` file (preferable if t
 
 We will be working with GRIB files since it's the praised way even though most people work with the netCDF format.
 
+### UPDATE
+
+We work with netCDF now.
+
 # Understand GRIB files
 
 There's 2 options :

@@ -29,6 +29,7 @@ Currently, the pipeline only works with the following AMERIFLUX predictors:
 - VPD 
 - RH
 - PPFD_IN, PPFD_OUT
-- CO2
+- CO2 (may not work for point processing, i.e. `carbonpipeline point ...`)
+- WTD (may not work for point processing, i.e. `carbonpipeline point ...`)
 - SWC_1, SWC_2, SWC_3, SWC_4, SWC_5 (values may not be currently accurate)
 - TS_1, TS_2, TS_3, TS_4, TS_5 (values may not be currently accurate)

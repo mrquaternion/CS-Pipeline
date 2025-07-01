@@ -11,11 +11,12 @@ dependencies = [
     "pandas",
     "ipykernel",
     "netCDF4",
-    "timezonefinder"
+    "timezonefinder",
+    "beautifulsoup4"
 ]
 
 [project.scripts]
-carbonpipeline = "carbonpipeline.cli:main"
+carbonpipeline = "carbonpipeline.cli:run"
 
 [tool.setuptools]
 packages = ["carbonpipeline"]

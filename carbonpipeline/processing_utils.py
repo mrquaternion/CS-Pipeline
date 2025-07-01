@@ -134,38 +134,6 @@ PROCESSORS = {
     'SWC_5': lambda x: x * 100,
     'PPFD_IN': photosynthesis_photo_flux_density,
     'PPFD_OUT': photosynthesis_photo_flux_density,
-    'CO2': dry_to_wet_co2_fraction
-}
-
-VARIABLES_FOR_PREDICTOR = {
-    "TA":        ['2m_temperature'],
-    "P":         ['total_precipitation'],
-    "RH":        ['2m_temperature', '2m_dewpoint_temperature'],
-    "VPD":       ['2m_temperature', '2m_dewpoint_temperature'],
-    "PA":        ['surface_pressure'],
-    "CO2":       ['2m_temperature', '2m_dewpoint_temperature', 'surface_pressure', 'xco2'],
-    "SW_IN":     ['mean_surface_downward_short_wave_radiation_flux'],
-    "SW_IN_POT": ['mean_surface_downward_short_wave_radiation_flux_clear_sky'],
-    "SW_OUT":    ['mean_surface_downward_short_wave_radiation_flux', 'forecast_albedo'],
-    "LW_IN":     ['mean_surface_downward_long_wave_radiation_flux'],
-    "LW_OUT":    ['mean_surface_downward_long_wave_radiation_flux', 'mean_surface_net_long_wave_radiation_flux'],
-    "NETRAD":    ['mean_surface_downward_short_wave_radiation_flux', 'mean_surface_downward_long_wave_radiation_flux', 'mean_surface_net_long_wave_radiation_flux', 'forecast_albedo'],
-    "WS":        ['10m_u_component_of_wind', '10m_v_component_of_wind'],
-    "WD":        ['10m_u_component_of_wind', '10m_v_component_of_wind'],
-    "USTAR":     ['friction_velocity'],
-    "SWC_1":     ['volumetric_soil_water_layer_1'],
-    "SWC_2":     ['volumetric_soil_water_layer_1'],
-    "SWC_3":     ['volumetric_soil_water_layer_2'],
-    "SWC_4":     ['volumetric_soil_water_layer_2'],
-    "SWC_5":     ['volumetric_soil_water_layer_3'],
-    "TS_1":      ['soil_temperature_level_1'],
-    "TS_2":      ['soil_temperature_level_1'],
-    "TS_3":      ['soil_temperature_level_2'],
-    "TS_4":      ['soil_temperature_level_2'],
-    "TS_5":      ['soil_temperature_level_3'],
-    "G":         ['mean_surface_sensible_heat_flux', 'mean_surface_latent_heat_flux', 'mean_surface_downward_short_wave_radiation_flux', 'mean_surface_downward_long_wave_radiation_flux', 'mean_surface_net_long_wave_radiation_flux','forecast_albedo'],
-    "H":         ['mean_surface_sensible_heat_flux'],
-    "LE":        ['mean_surface_latent_heat_flux'],
-    "PPFD_IN":   ['mean_surface_downward_short_wave_radiation_flux'],
-    "PPFD_OUT":   ['mean_surface_downward_short_wave_radiation_flux', 'forecast_albedo']
+    'CO2': dry_to_wet_co2_fraction,
+    'WTD': lambda x: x
 }

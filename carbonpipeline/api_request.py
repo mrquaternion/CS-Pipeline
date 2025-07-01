@@ -1,11 +1,10 @@
 # carbonpipeline/api_request.py
 import os
 import cdsapi
-from carbonpipeline.constants import *
+from .constants import *
 
 
 CO2_FOLDERNAME = "CO2_2003-2022"
-
 
 class APIRequest:
     """
@@ -26,6 +25,7 @@ class APIRequest:
     vars : list[str) | None 
         Optional list of high-level variables under ERA5 long version naming.
     """
+
     def __init__(self, year: str, month: str, day: str, time: str, coords: list[float], vars_: list[str]):
         self.year = year
         self.month = month
@@ -35,7 +35,7 @@ class APIRequest:
         self.vars = vars_
         self.area = None
 
-    def query_era5(self, zip_dir: str):
+    def query_era5(self, zip_dir: str) -> None:
         """
         Constructs and submits a download request to the CDS API for ERA5 single-level reanalysis data.
         """
@@ -70,7 +70,7 @@ class APIRequest:
         return filename
     
     @classmethod
-    def query_co2(self, zip_dir: str):
+    def query_co2(self, zip_dir: str) -> None:
         dataset = "satellite-carbon-dioxide"
         request = {
             "processing_level": ["level_3"],
@@ -82,7 +82,8 @@ class APIRequest:
         client = cdsapi.Client()
         result = client.retrieve(dataset, request)
 
-        target = os.path.join(zip_dir, CO2_FOLDERNAME)
+        filename = f"{CO2_FOLDERNAME}.zip"
+        target = os.path.join(zip_dir, filename)
 
         result.download(target)
 

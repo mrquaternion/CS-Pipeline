@@ -1,0 +1,168 @@
+# carbonpipeline/downloader.py
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+import os
+import zipfile
+from bs4 import BeautifulSoup
+import pandas as pd
+import requests
+from tqdm import tqdm
+
+from .api_request import CO2_FOLDERNAME, APIRequest
+from .config import CarbonPipelineConfig
+
+
+class DataDownloader:
+    """Handles downloading operations for various data sources."""
+    
+    def __init__(self, config: CarbonPipelineConfig):
+        self.config = config
+    
+    async def download_co2_data(self) -> None:
+        """Download CO2 data asynchronously."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._download_co2_sync)
+    
+    def _download_co2_sync(self) -> None:
+        """Synchronous CO2 download helper."""
+        print("Downloading CO2 data...")
+        APIRequest.query_co2(self.config.ZIP_DIR)
+        zip_fp = os.path.join(self.config.ZIP_DIR, f"{CO2_FOLDERNAME}.zip")
+        unzip_fp = os.path.join(self.config.UNZIP_DIR, CO2_FOLDERNAME)
+        self._extract_zip(zip_fp, unzip_fp)
+        print("CO2 data downloaded and extracted.")
+
+    async def web_scraping_wtd(self, start_date: str, end_date: str) -> None:
+        """Web scraping for WTD data asynchronously."""
+        loop = asyncio.get_running_loop()
+        print("Starting WTD web scraping...")
+        await loop.run_in_executor(None, self._web_scraping_wtd_sync, start_date, end_date)
+        print("WTD data download complete.")
+    
+    def _web_scraping_wtd_sync(self, start_date: str, end_date: str) -> None:
+        """Synchronous WTD web scraping helper."""
+        response = requests.get(self.config.WTD_URL)
+        response.raise_for_status()
+        html_content = response.text
+        soup = BeautifulSoup(html_content, "html.parser")
+
+        links = soup.find_all('a')
+
+        date_to_filename = {}
+        for link in links:
+            href = link.get("href")
+            if href and ".tif" in href and "-bot-" not in href:
+                try:
+                    fn, _ = href.split(".")
+                    _, _, date_str = fn.split("-")
+                    datetime_object = datetime.strptime(date_str, "%Y%m%d")
+                    date_to_filename[pd.to_datetime(datetime_object, format="%Y%m")] = href
+                except (ValueError, IndexError):
+                    continue
+
+        start_date_obj = pd.to_datetime(start_date)
+        end_date_obj = pd.to_datetime(end_date)
+
+        start_str = start_date_obj.strftime("%Y-%m")
+        end_str = end_date_obj.strftime("%Y-%m")
+
+        filename = "_".join(["WTD", start_str, end_str])
+        dir_ = os.path.join(self.config.UNZIP_DIR, filename)
+
+        os.makedirs(dir_, exist_ok=True)
+
+        hrs = pd.date_range(start=start_date, end=end_date, freq="h")
+        month_ends = {hr.to_period("M").to_timestamp(how="end").normalize() for hr in hrs}
+
+        fns_to_download = {date_to_filename[d] for d in month_ends if d in date_to_filename}
+        list_of_url_filename_pairs = [(self.config.WTD_URL + fn, os.path.join(dir_, fn)) for fn in fns_to_download]
+        
+        if not list_of_url_filename_pairs:
+            print("No WTD files found for the specified date range.")
+            return
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            list(
+                tqdm(
+                    executor.map(
+                        self._download_tif_with_progress, 
+                        list_of_url_filename_pairs
+                    ), 
+                total=len(list_of_url_filename_pairs), desc="Downloading WTD files")
+            )
+
+    def _download_tif_with_progress(self, url_filename) -> None:
+        """Download TIF file with progress bar."""
+        url, filename = url_filename
+        
+        try:
+            r = requests.get(url, stream=True)
+            r.raise_for_status()
+            total_size = int(r.headers.get("content-length", 0))
+
+            with open(filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192): 
+                    if chunk:
+                        f.write(chunk)
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to download {url}: {e}")
+
+    async def download_groups_async(
+            self, 
+            groups: list[tuple], 
+            vars_: list[str], 
+            coords: list[float]
+    ) -> list[str]:
+        """Asynchronous wrapper for download_groups using a background thread."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.download_groups, groups, vars_, coords)
+
+    def download_groups(
+            self, 
+            groups: list[tuple], 
+            vars_: list[str], 
+            coords: list[float]
+    ) -> list[str]:
+        """Download data for multiple groups."""
+        fldrs = [] 
+        for group in tqdm(groups, desc="Downloading hourly data", unit="hour", colour="green"):
+            fname = self._prepare_group_request(group, self.config.ZIP_DIR, coords, vars_)
+            if fname:
+                zip_fp = os.path.join(self.config.ZIP_DIR, fname)
+                unzip_fp = os.path.join(self.config.UNZIP_DIR, fname.split('.')[0])
+                fldrs.append(unzip_fp)
+                self._extract_zip(zip_fp, unzip_fp)
+        return fldrs
+
+    def _prepare_group_request(
+            self, 
+            group: tuple, 
+            dir_: str, 
+            coords: list[float], 
+            vars_: list[str]
+    ) -> str:
+        """
+        Queries data for a specific date and location, then downloads the results.
+        """
+        Y, M, D, t = group
+        request = APIRequest(year=str(Y), month=f"{int(M):02d}", day=f"{int(D):02d}",
+                            time=str(t),
+                            coords=coords, vars_=vars_)
+        
+        return request.query_era5(dir_)
+
+    def _extract_zip(self, zip_fp: str, unzip_fp: str) -> None:
+        """
+        Extracts all files from a ZIP archive to a specified directory.
+        """
+        if not os.path.exists(zip_fp):
+            print(f"Warning: ZIP file not found {zip_fp}, skipping extraction.")
+            return
+        os.makedirs(unzip_fp, exist_ok=True)
+        with zipfile.ZipFile(zip_fp, "r") as zp:
+            try: 
+                zp.extractall(unzip_fp)
+                os.remove(zip_fp)
+            except zipfile.error as e: 
+                print(f"Failed to extract {zip_fp}: {e}")
