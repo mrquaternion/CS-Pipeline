@@ -8,5 +8,3 @@ GEO_TIME_PREDICTORS = ('valid_time', 'latitude', 'longitude')
 
 IGBP_CODES = ('ENF', 'MF', 'WET', 'CRO', 'GRA', 'WAT', 'SAV', 'DBF', 'CSH', 'OSH', 'EBF', 'WSA', 'BSV', 'URB',
               'DNF', 'CVM', 'SNO')
-
-ERA5_RESOLUTION = 0.25 # In degrees
