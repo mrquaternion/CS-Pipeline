@@ -12,3 +12,5 @@ manifest.json
 out.nc
 unzip/
 test.nc
+merge_era5_and_co2_proc.ipynb
+merge_era5_and_wtd_proc.ipynb
