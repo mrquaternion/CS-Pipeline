@@ -4,7 +4,7 @@ AMF_PREDICTORS = ('DOY', 'TOD', 'TA', 'P', 'RH', 'VPD', 'PA', 'CO2', 'SW_IN', 'S
 
 AMF_TARGETS = ('NEE', 'GPP_DT', 'GPP_NT', 'RECO_DT', 'RECO_NT', 'FCH4')
 
-GEO_TIME_PREDICTORS = ('valid_time', 'latitude', 'longitude')
+GEO_TIME_PREDICTORS = ('timestamps', 'lat', 'lon')
 
 IGBP_CODES = ('ENF', 'MF', 'WET', 'CRO', 'GRA', 'WAT', 'SAV', 'DBF', 'CSH', 'OSH', 'EBF', 'WSA', 'BSV', 'URB',
               'DNF', 'CVM', 'SNO')
