@@ -83,7 +83,7 @@ class CarbonPipeline:
         if merged_ds is None:
             print("No data to process. Exiting.")
             return
-            
+        
         merged_ds = self.dataset_manager.apply_column_rename(merged_ds)
         print("ERA5:")
         print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())

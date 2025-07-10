@@ -65,10 +65,12 @@ class ArgumentParserManager:
                 f"Valid options are: {', '.join(VARIABLES_FOR_PREDICTOR)}"
             )
 
-        if not current_preds and not needs_wtd:
-            print("No predictors specified, processing all available ERA5 predictors.")
+        if not current_preds:
+            print("No predictors specified, processing all available ERA5 predictors, CO2 and WTD.")
             vars_ = ERA5_VARIABLES
             args.preds = list(VARIABLES_FOR_PREDICTOR)
+            needs_wtd = True
+            needs_co2 = True
         else:
             needed = {var for pred in current_preds for var in VARIABLES_FOR_PREDICTOR[pred]}
             vars_ = list(needed)
@@ -109,31 +111,35 @@ async def main():
 
     pipeline.setup_dirs(pipeline.config.ZIP_DIR, pipeline.config.UNZIP_DIR)
     
-    main_tasks = []
-    if needs_co2:
-        await pipeline.downloader.download_co2_data() # Can't be done async or else ERA5 will fail
+    download_tasks = []
+    if needs_co2: 
+        await pipeline.downloader.download_co2_data()
     if needs_wtd:
-        main_tasks.append(pipeline.downloader.web_scraping_wtd(args.start, args.end))
+        download_tasks.append(asyncio.create_task(
+            pipeline.downloader.web_scraping_wtd(args.start, args.end)
+        ))
 
     if args.command == "point":
         ArgumentParserManager.pretty_print_inputs(
             "Point Command Inputs", File=args.file, Coordinates=args.coords,
             Start=args.start, End=args.end, Predictors=args.preds, ERA5_Vars=vars_
         )
-        main_tasks.append(pipeline.run_point_download(
-            args.file, args.output_format, args.coords, args.start, args.end, 
-            args.preds, vars_, needs_wtd, needs_co2
+        download_tasks.append(asyncio.create_task(
+            pipeline.run_point_download(
+                args.file, args.output_format, args.coords, args.start, args.end, 
+                args.preds, vars_, needs_wtd, needs_co2
+            )
         ))
     elif args.command == "area" and args.action == "download":
         ArgumentParserManager.pretty_print_inputs(
             "Area Download Inputs", Area=args.coords, Start=args.start, 
             End=args.end, Predictors=args.preds, ERA5_Vars=vars_
         )
-        main_tasks.append(pipeline.run_area_download(
-            args.coords, args.start, args.end, args.preds, vars_
+        download_tasks.append(asyncio.create_task(
+            pipeline.run_area_download(args.coords, args.start, args.end, args.preds, vars_)
         ))
 
-    await asyncio.gather(*main_tasks)
+    await asyncio.gather(*download_tasks)
 
     print("\n✅ All tasks completed.")
 

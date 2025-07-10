@@ -99,7 +99,7 @@ class DataDownloader:
         try:
             r = requests.get(url, stream=True)
             r.raise_for_status()
-            total_size = int(r.headers.get("content-length", 0))
+            #total_size = int(r.headers.get("content-length", 0))
 
             with open(filename, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192): 

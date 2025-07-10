@@ -57,7 +57,7 @@ class DatasetManager:
         """print(ds_co2_sortby.to_dataframe())"""
 
         ds_era5_coord_reajusted = self._assign_closest_lat_lon(ds_era5, ds_co2_monthly_cut, "latitude", "longitude")
-        ds_era5_sortby = ds_era5_coord_reajusted.isel(valid_time=slice(0, 5)).sortby(['lat', 'lon'], ascending=[False, False])
+        ds_era5_sortby = ds_era5_coord_reajusted.sortby(['lat', 'lon'], ascending=[False, False])
 
         """print(ds_era5_sortby.to_dataframe())"""
 
@@ -220,7 +220,6 @@ class DatasetManager:
         tmp_dir = "./outputs_tmp"
         shutil.rmtree(tmp_dir, ignore_errors=True)
         os.makedirs(tmp_dir, exist_ok=True)
-
         processor = DataProcessor(self.config)
         # Process in larger time chunks for efficiency
         for i in tqdm(range(ds.sizes['valid_time']), desc="Processing and writing chunks"):
