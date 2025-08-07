@@ -8,9 +8,10 @@ from tqdm import tqdm
 import xarray as xr
 import rioxarray as rxr
 
+from shapely.geometry import Point, Polygon
 from .api_request import CO2_FOLDERNAME
-from .constants import SHORTNAME_TO_FULLNAME
-from .processor import DataProcessor
+from .Processing.constants import SHORTNAME_TO_FULLNAME
+from .Processing.processor import DataProcessor
 from .config import CarbonPipelineConfig
 
 
@@ -19,7 +20,7 @@ class DatasetManager:
     
     def __init__(self, config: CarbonPipelineConfig):
         self.config = config
-    
+        
     def merge_unzipped(self, dirs: list[str]) -> xr.Dataset:
         """
         Merges NetCDF files from multiple subfolders into a single xarray Dataset.
@@ -34,8 +35,7 @@ class DatasetManager:
             return None
 
         return xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords",
-                                chunks={"time": "auto"}, drop_variables=["number", "expver"],
-                                parallel=True) # Enable parallel reading
+                                chunks={"time": "auto"}, drop_variables=["number", "expver"])
 
     def add_co2_column(self, ds_era5: xr.Dataset, ds_co2: xr.Dataset) -> xr.Dataset:
         """Prepare CO2 dataset for merging."""

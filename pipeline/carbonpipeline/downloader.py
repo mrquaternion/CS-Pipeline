@@ -33,7 +33,7 @@ class DataDownloader:
         self._extract_zip(zip_fp, unzip_fp)
         print("CO2 data downloaded and extracted.")
 
-    async def web_scraping_wtd(self, start_date: str, end_date: str) -> None:
+    async def download_wtd_data(self, start_date: str, end_date: str) -> None:
         """Web scraping for WTD data asynchronously."""
         loop = asyncio.get_running_loop()
         print("Starting WTD web scraping...")
@@ -112,17 +112,19 @@ class DataDownloader:
             self, 
             groups: list[tuple], 
             vars_: list[str], 
-            coords: list[float]
+            coords: list[float],
+            region_id: str = None
     ) -> list[str]:
         """Asynchronous wrapper for download_groups using a background thread."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.download_groups, groups, vars_, coords)
+        return await loop.run_in_executor(None, self.download_groups, groups, vars_, coords, region_id)
 
     def download_groups(
             self, 
             groups: list[tuple], 
             vars_: list[str], 
-            coords: list[float]
+            coords: list[float],
+            region_id: str = None 
     ) -> list[str]:
         """Download data for multiple groups."""
         fldrs = [] 
@@ -130,7 +132,15 @@ class DataDownloader:
             fname = self._prepare_group_request(group, self.config.ZIP_DIR, coords, vars_)
             if fname:
                 zip_fp = os.path.join(self.config.ZIP_DIR, fname)
-                unzip_fp = os.path.join(self.config.UNZIP_DIR, fname.split('.')[0])
+
+                # Create region-specific unzip directory
+                if region_id:
+                    base_unzip_dir = os.path.join(self.config.UNZIP_DIR, region_id)
+                    os.makedirs(base_unzip_dir, exist_ok=True)
+                    unzip_fp = os.path.join(base_unzip_dir, fname.split('.')[0])
+                else:
+                    unzip_fp = os.path.join(self.config.UNZIP_DIR, fname.split('.')[0])
+
                 fldrs.append(unzip_fp)
                 self._extract_zip(zip_fp, unzip_fp)
         return fldrs

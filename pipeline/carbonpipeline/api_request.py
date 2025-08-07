@@ -1,7 +1,7 @@
 # carbonpipeline/api_request.py
 import os
 import cdsapi
-from .constants import *
+from .Processing.constants import *
 
 
 CO2_FOLDERNAME = "CO2_2003-2022"

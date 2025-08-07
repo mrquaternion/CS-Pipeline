@@ -6,17 +6,22 @@ readme = "README.md"
 dependencies = [
     "cdsapi",
     "xarray",
-    "numpy",
+    "numpy<2",                       
+    "pandas>=2.0.3,<3",              
+    "numexpr",                       
     "eccodes",
-    "pandas",
     "ipykernel",
     "netCDF4",
     "timezonefinder",
-    "beautifulsoup4"
+    "beautifulsoup4",
+    "pyyaml",
+    "rioxarray",
+    "shapely",
+    "dask"
 ]
 
 [project.scripts]
-carbonpipeline = "carbonpipeline.cli:run"
+carbonpipeline = "carbonpipeline.main:run"
 
 [tool.setuptools]
 packages = ["carbonpipeline"]
