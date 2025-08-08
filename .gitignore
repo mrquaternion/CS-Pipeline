@@ -16,3 +16,8 @@ merge_era5_and_co2_proc.ipynb
 merge_era5_and_wtd_proc.ipynb
 EcoPerceiver/
 *.nc
+carbonpipeline/__pycache__/
+carbonpipeline/Processing/__pycache__/
+carbonpipeline/Geometry/__pycache__/
+../.idea/
+.idea/

@@ -16,7 +16,6 @@ dependencies = [
     "beautifulsoup4",
     "pyyaml",
     "rioxarray",
-    "shapely",
     "dask"
 ]
 

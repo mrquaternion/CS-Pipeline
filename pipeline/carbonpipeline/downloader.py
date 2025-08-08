@@ -1,5 +1,6 @@
 # carbonpipeline/downloader.py
 import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import os
@@ -11,6 +12,15 @@ from tqdm import tqdm
 
 from .api_request import CO2_FOLDERNAME, APIRequest
 from .config import CarbonPipelineConfig
+
+
+class DataDownloaderError(Exception):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
 
 
 class DataDownloader:
@@ -79,8 +89,9 @@ class DataDownloader:
         list_of_url_filename_pairs = [(self.config.WTD_URL + fn, os.path.join(dir_, fn)) for fn in fns_to_download]
         
         if not list_of_url_filename_pairs:
-            print("No WTD files found for the specified date range.")
-            return
+            raise DataDownloaderError("No WTD files found for the specified date range. Please remove "
+                                      "this predictor from the config file or visit the available dates here: "
+                                      "https://geo.public.data.uu.nl/vault-globgm/research-globgm%5B1669042611%5D/original/output/version_1.0/transient_1958-2015/")
 
         with ThreadPoolExecutor(max_workers=4) as executor:
             list(
@@ -89,7 +100,9 @@ class DataDownloader:
                         self._download_tif_with_progress, 
                         list_of_url_filename_pairs
                     ), 
-                total=len(list_of_url_filename_pairs), desc="Downloading WTD files")
+                    total=len(list_of_url_filename_pairs),
+                    desc="Downloading WTD files"
+                ),
             )
 
     def _download_tif_with_progress(self, url_filename) -> None:

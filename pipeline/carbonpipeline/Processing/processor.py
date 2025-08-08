@@ -64,7 +64,7 @@ class DataProcessor:
         filtered_df = df[df["timestamp"].between(start_ts, end_ts)].copy()
         return self._find_missing_rows(filtered_df)
 
-    def _validate_date_format(self, ts: str | int) -> str:
+    def _validate_date_format(self, ts: str | int) -> any:
         """Validate and format date strings."""
         if isinstance(ts, str):                                      
             try:
@@ -110,7 +110,20 @@ class DataProcessor:
         miss.loc[:, "time"] = miss["timestamp"].dt.strftime('%H:%M:%S')
         return miss
 
-    def adjust_timezone(self, df: pd.DataFrame, coords: list[float]) -> pd.DataFrame:
+    def adjust_timezone_str(self, coords: list[float], *dates):
+        """Adjust requested dates timezone based on coordinates."""
+        result = []
+        tz = self.tz_finder.timezone_at(lat=coords[0], lng=coords[1])
+        for date in dates:
+            dt = pd.to_datetime(date, errors="coerce")
+            if pd.isna(dt):
+                raise ValueError(f"Date invalide : {date}")
+            # Application du fuseau horaire
+            dt = dt.tz_localize(tz).tz_convert("UTC").tz_localize(None)
+            result.append(dt)
+        return result
+
+    def adjust_timezone_df(self, df: pd.DataFrame, coords: list[float]) -> pd.DataFrame:
         """Adjust DataFrame timezone based on coordinates."""
         dftz = df.copy()
         tz = self.tz_finder.timezone_at(lat=coords[0], lng=coords[1])

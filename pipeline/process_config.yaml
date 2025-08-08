@@ -1,8 +1,8 @@
 # process_config.yaml
 action: process
-output-filename:  # name of the output file
-data-file:        # CSV file or nothing (for gap-filling on specific EC tower site)
-coords-file: null # do not touch
-start: null       # do not touch
-end: null         # do not touch
-preds: []         # do not touch
+output-filename: test   # suffix of the output files
+data-file:              # CSV file or nothing (for gap-filling on specific EC tower site)
+coords-file: null       # do not touch
+start: null             # do not touch
+end: null               # do not touch
+preds: []               # do not touch

@@ -35,7 +35,7 @@ class APIRequest:
         self.vars = vars_
         self.area = None
 
-    def query_era5(self, zip_dir: str) -> None:
+    def query_era5(self, zip_dir: str) -> str:
         """
         Constructs and submits a download request to the CDS API for ERA5 single-level reanalysis data.
         """
@@ -63,9 +63,9 @@ class APIRequest:
         filename = f"ERA5_{self.year}-{self.month}-{self.day}T{self.time}.zip"
         target = os.path.join(zip_dir, filename)
         
-        print(f"Starting download for {self.year}-{self.month}-{self.day}T{self.time} -> {target}")
+        print(f"\nStarting download for {self.year}-{self.month}-{self.day}T{self.time} -> {target}")
         result.download(target)
-        print(f"Finished download for {self.year}-{self.month}-{self.day}T{self.time}")
+        print(f"\nFinished download for {self.year}-{self.month}-{self.day}T{self.time}")
 
         return filename
     

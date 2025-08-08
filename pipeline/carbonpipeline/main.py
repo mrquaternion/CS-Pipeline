@@ -3,7 +3,6 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Union 
 
 from .argparser import ArgumentParserManager
 from .Geometry.geometry_processor import GeometryProcessor
@@ -12,14 +11,14 @@ from .Processing.constants import *
 from .core import CarbonPipeline
 
 
-class PipelineError(Exception):
+class CommandExecutorError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
 
     def __str__(self) -> str:
         return self.message
-    
+
 
 class SpecialPredictors:
     def __init__(self, predictors: list[str]):
@@ -49,7 +48,7 @@ class CommandExecutor:
         self.pipeline = CarbonPipeline()
 
         self.action = config_dict.get("action")
-        self.output_filename = config_dict.get("output-filename")
+        self.output_suffix = config_dict.get("output-filename")
         self.data_file = config_dict.get("data-file")
         self.coords_file = config_dict.get("coords-file")
         self.start = config_dict.get("start")
@@ -77,7 +76,7 @@ class CommandExecutor:
             case "process":
                 ArgumentParserManager.pretty_print_inputs(
                     "Processing Data Step", 
-                    OutputDirectory=f"{self.output_filename}.nc", 
+                    OutputDirectory=self.pipeline.config.OUTPUT_PROCESSED_DIR,
                     DataFile=self.data_file
                 )
                 self._processing_step()
@@ -104,7 +103,7 @@ class CommandExecutor:
 
         # Download ERA5 data sequentially for each region (to avoid CDS conflicts)
         for region_idx, region in enumerate(regions_list):
-            print(f"REGION: {self.rect_regions}")
+            print(f"REGIONS: {self.rect_regions}")
             region_id = self._generate_region_id(region_idx, region)
             await self._download_for_region(region, region_id)
 
@@ -112,21 +111,30 @@ class CommandExecutor:
         """
         Logic for the processing step.
         """
+        self.pipeline.setup_manifest_and_dirs(None, self.pipeline.config.OUTPUT_PROCESSED_DIR)
+
         all_features = self.pipeline.load_features_from_manifest()
         for i in range(len(all_features)):
+            preds = all_features[i]["preds"]
+            start = all_features[i]["start_date"]
+            end = all_features[i]["end_date"]
+            geometry = all_features[i]["geometry"]
             unzip_dirs = all_features[i]["unzip_sub_folders"]
+            region_id = all_features[i]["region_id"]
+            ds = self.pipeline.dataset_manager.merge_unzipped(unzip_dirs)
 
-    def _postdownloading_step(self):
-        """
-        If the polygon is non-rectangular, then we need to filter the original coordinates from the downloaded data 
-        """
-        if self.geometry_struct.geom_type != GeometryType.POINT:
-            # Remove all the coordinates we are not interested in
-            all_features = self.pipeline.load_features_from_manifest()
-            for i in range(len(all_features)):
-                unzip_dirs = all_features[i]["unzip_sub_folders"]
-                poly = self.geometry_struct.data[i]
-                ds = self.pipeline.dataset_manager.remove_coordinates(unzip_dirs, poly)
+            if not self.output_suffix: self.output_suffix = "output"
+            output_name = "_".join([self.output_suffix , region_id])
+
+            match geometry:
+                case GeometryType.POINT.value:
+                    if self.data_file:
+                        self.pipeline.run_point_process(self.data_file, preds, start, end, output_name)
+                    else:
+                        # fallback if the client doesn't want gap-filling to the given dataset
+                        self.pipeline.run_area_process(ds, preds, start, end, output_name)
+                case _:
+                    self.pipeline.run_area_process(ds, preds, start, end, output_name)
 
     def _get_regions_list(self) -> list:
         """
@@ -164,7 +172,7 @@ class CommandExecutor:
             bounding_box = [90, -180, -90, 180]
             self.geometry_struct, self.rect_regions = Geometry(data=bounding_box), bounding_box # Geometry.data == self.rect_regions
         else:
-            coords_raw = self._parse_coords_file(self.coords_file)
+            coords_raw = self._parse_coords_file()
             self.geometry_struct, self.rect_regions = GeometryProcessor.process_geometry(coords_raw)
 
         # Clean the dates
@@ -193,8 +201,8 @@ class CommandExecutor:
         if "wtd" in self.vars:
             self.vars.remove("wtd") # Same here
 
-    def _parse_coords_file(self, pathStr: str) -> list:
-        path = Path(pathStr)
+    def _parse_coords_file(self) -> list:
+        path = Path(self.coords_file)
         with open(path, "r") as f:
             if path.suffix == ".geojson":
                 json_dict = json.load(f)
@@ -218,7 +226,7 @@ class CommandExecutor:
         """Download ERA5 data for a single region. Runs sequentially to avoid CDS conflicts."""
         print(f"⬇️ Downloading ERA5 data for {region_id}...")
         await self.pipeline.run_download(
-            region, region_id, self.start, self.end,
+            region, region_id, self.geometry_struct.geom_type.value, self.start, self.end,
             self.preds, self.vars
         )
                 
@@ -232,10 +240,10 @@ async def main():
 
     if ce.action == "process":
         unzip_dir = ce.pipeline.config.UNZIP_DIR
-        if not os.path.exists((unzip_dir)):
-            raise PipelineError(f"Unzip directory does not exist: {unzip_dir}. Please download data first.")
+        if not os.path.exists(unzip_dir):
+            raise CommandExecutorError(f"Unzip directory does not exist: {unzip_dir}. Please download data first.")
         if not os.listdir(unzip_dir):
-            raise PipelineError("No downloads found in the unzip directory. Please download data first.")
+            raise CommandExecutorError("No downloads found in the unzip directory. Please download data first.")
 
     await ce.run()
 

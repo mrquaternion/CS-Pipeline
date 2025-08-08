@@ -8,7 +8,6 @@ from tqdm import tqdm
 import xarray as xr
 import rioxarray as rxr
 
-from shapely.geometry import Point, Polygon
 from .api_request import CO2_FOLDERNAME
 from .Processing.constants import SHORTNAME_TO_FULLNAME
 from .Processing.processor import DataProcessor
@@ -73,7 +72,7 @@ class DatasetManager:
 
         return ds_era5_sortby
         
-    def add_wtd_column(self, ds_era5: xr.Dataset, ds_wtd: xr.Dataset) -> None:
+    def add_wtd_column(self, ds_era5: xr.Dataset, ds_wtd: xr.Dataset) -> xr.Dataset:
         """Add WTD column to ERA5 dataset."""
 
         # Remove unwanted columns
@@ -238,23 +237,22 @@ class DatasetManager:
         
         return tmp_dir
 
-    def concat_chunks(self, tmp_dir: str, final_out: str) -> None:
+    def concat_chunks(self, tmp_dir: str, out_name: str) -> None:
         """Concatenate chunks into final output."""
         paths = glob.glob(os.path.join(tmp_dir, "*.nc"))
         if not paths:
             print("No chunks found to concatenate.")
             return
-            
-        ds = xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords", 
-                              chunks={"valid_time": "auto"}, parallel=True)
-        ds.to_netcdf(final_out, mode="w", format="NETCDF4", engine="netcdf4")
-        print(f"Final dataset saved to {final_out}")
 
-    def save_output(self, format: str, df: pd.DataFrame, out_name: str) -> None:
+        out_dir = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
+
+        ds = xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords", chunks={"valid_time": "auto"}, parallel=True)
+        ds.to_netcdf(out_dir, mode="w", format="NETCDF4", engine="netcdf4")
+        print(f"Final dataset saved to {out_dir}\n")
+
+    def save_output(self, df: pd.DataFrame, out_name: str) -> None:
         """Save output in specified format."""
-        if format == "csv":
-            df.to_csv(f"{out_name}.csv")
-        else:
-            (df.to_xarray()
-               .to_netcdf(f"{out_name}.nc", format="NETCDF4", engine="netcdf4"))
+        out_dir = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
+        (df.to_xarray()
+           .to_netcdf(out_dir, format="NETCDF4", engine="netcdf4"))
         print(f"Output saved to {out_name}.{format}")
