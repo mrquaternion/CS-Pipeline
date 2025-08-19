@@ -36,12 +36,11 @@ class DataDownloader:
     
     def _download_co2_sync(self) -> None:
         """Synchronous CO2 download helper."""
-        print("Downloading CO2 data...")
         APIRequest.query_co2(self.config.ZIP_DIR)
         zip_fp = os.path.join(self.config.ZIP_DIR, f"{CO2_FOLDERNAME}.zip")
         unzip_fp = os.path.join(self.config.UNZIP_DIR, CO2_FOLDERNAME)
         self._extract_zip(zip_fp, unzip_fp)
-        print("CO2 data downloaded and extracted.")
+        print("\nCO2 data downloaded and extracted.")
 
     async def download_wtd_data(self, start_date: str, end_date: str) -> None:
         """Web scraping for WTD data asynchronously."""

@@ -2,8 +2,8 @@
 action: download
 output-filename: null           # do not touch
 data-file: null                 # do not touch
-coords-file: simplified.geojson # directory of JSON files or nothing
+coords-file: geojsons           # single file, directory of JSON files or nothing
 start: 2015-01-01T00:00:00      # timestamp format: YYYY-MM-DDTHH:MM:SS
-end: 2015-01-01T01:00:00        # timestamp format: YYYY-MM-DDTHH:MM:SS
+end: 2015-01-01T23:00:00        # timestamp format: YYYY-MM-DDTHH:MM:SS
 preds:                          # array of AMF predictors or nothing
 

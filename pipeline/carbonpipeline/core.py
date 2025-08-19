@@ -6,6 +6,8 @@ import shutil
 import xarray as xr
 
 import pandas as pd
+
+from .Geometry.geometry import Geometry
 from .config import CarbonPipelineConfig
 from .Processing.processor import DataProcessor
 from .downloader import DataDownloader
@@ -25,11 +27,13 @@ class CarbonPipeline:
         self,
         coords: list[float],
         region_id: str,
-        geometry: str,
+        geometry: Geometry,
         start: str,
         end: str,
         preds: list[str],
-        vars_: list[str]
+        vars_: list[str],
+        threshold_activated: bool,
+        rect_regions: list[list[float]]
     ) -> None:
         """
         Downloads ERA5 datasets for a specified area and time range.
@@ -44,7 +48,9 @@ class CarbonPipeline:
             "unzip_sub_folders": unzip_dirs,
             "start_date": start, 
             "end_date": end,
-            "geometry": geometry
+            "geometry": geometry.geom_type.value,
+            "threshold_activated": threshold_activated,
+            "rect_regions": rect_regions
         }
 
         manifest_path = Path(self.config.OUTPUT_MANIFEST)
@@ -106,17 +112,14 @@ class CarbonPipeline:
         self,
         data_fp: str,
         preds: list[str],
-        unzip_dirs: list[str],
+        merged_ds: xr.Dataset,
         start: str,
         end: str,
+        output_name: str
     ) -> None:
         """
         Post-processes downloaded data for a single point.
         """
-        merged_ds = self.dataset_manager.merge_unzipped(unzip_dirs)
-        if merged_ds is None:
-            print("No downloaded data to process.")
-            return None
         df = self.processor.load_and_filter_dataframe(data_fp, start, end)
         if df.empty:
             print("No missing data found in the specified time range. Nothing to do.")
@@ -150,7 +153,7 @@ class CarbonPipeline:
         dfr.insert(0, "timestamp", ts.droplevel('source'))
 
         if dfr is not None:
-            self.dataset_manager.save_output(dfr, "point_output")
+            self.dataset_manager.save_output(dfr, output_name)
 
     def load_features_from_manifest(self) -> tuple[list[str], list[str], str, str]:
         """Load manifest file"""

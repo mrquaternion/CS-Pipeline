@@ -2,6 +2,8 @@
 import glob
 import os
 import shutil
+from typing import Union
+
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -19,22 +21,17 @@ class DatasetManager:
     
     def __init__(self, config: CarbonPipelineConfig):
         self.config = config
-        
-    def merge_unzipped(self, dirs: list[str]) -> xr.Dataset:
-        """
-        Merges NetCDF files from multiple subfolders into a single xarray Dataset.
-        """
-        paths = [
-            p 
-            for d in dirs 
-            for p in glob.glob(os.path.join(d, "*.nc"))
-        ]
-        
+
+    def merge_unzipped(self, dirs: list[str]) -> Union[xr.Dataset, None]:
+        paths = [p for d in dirs for p in glob.glob(os.path.join(d, "*.nc"))]
         if not paths:
             return None
 
-        return xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords",
-                                chunks={"time": "auto"}, drop_variables=["number", "expver"])
+        # Fallback w/o Dask: open each file and combine
+        dsets = [xr.open_dataset(p, engine="netcdf4", drop_variables=["number", "expver"])
+                 for p in paths]
+        ds = xr.combine_by_coords(dsets, combine_attrs="override")
+        return ds
 
     def add_co2_column(self, ds_era5: xr.Dataset, ds_co2: xr.Dataset) -> xr.Dataset:
         """Prepare CO2 dataset for merging."""
@@ -154,7 +151,7 @@ class DatasetManager:
 
         return ds[["xco2"]]
 
-    def load_and_clean_wtd_dataset(self, start: str, end: str) -> xr.Dataset:
+    def load_and_clean_wtd_dataset(self, start: str, end: str) -> Union[xr.Dataset, None]:
         """Load and clean WTD dataset."""
         wtd_dir_name = "_".join(["WTD", pd.to_datetime(start).strftime("%Y-%m"), pd.to_datetime(end).strftime("%Y-%m")])
         wtd_full_path = os.path.join(self.config.UNZIP_DIR, wtd_dir_name)
@@ -177,7 +174,7 @@ class DatasetManager:
         
         return xr.concat(datasets, dim="time") if datasets else None
 
-    def _match_to_closest(self, values, reference_points) -> None:
+    def _match_to_closest(self, values, reference_points):
         """Match values to closest reference points."""
         reference_points = np.asarray(reference_points)
         return np.array([reference_points[np.abs(reference_points - v).argmin()] for v in values])
@@ -238,17 +235,22 @@ class DatasetManager:
         return tmp_dir
 
     def concat_chunks(self, tmp_dir: str, out_name: str) -> None:
-        """Concatenate chunks into final output."""
-        paths = glob.glob(os.path.join(tmp_dir, "*.nc"))
+        paths = sorted(glob.glob(os.path.join(tmp_dir, "*.nc")))
         if not paths:
             print("No chunks found to concatenate.")
             return
 
-        out_dir = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
+        out_fp = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
 
-        ds = xr.open_mfdataset(paths, engine="netcdf4", combine="by_coords", chunks={"valid_time": "auto"}, parallel=True)
-        ds.to_netcdf(out_dir, mode="w", format="NETCDF4", engine="netcdf4")
-        print(f"Final dataset saved to {out_dir}\n")
+        # W/o dask: open each file and combine
+        dsets = [xr.open_dataset(p, engine="netcdf4") for p in paths]
+        ds = xr.combine_by_coords(dsets, combine_attrs="override")
+
+        # Compresser et définir des chunks de stockage NetCDF
+        encoding = {v: {"zlib": True, "complevel": 4} for v in ds.data_vars}
+
+        ds.to_netcdf(out_fp, mode="w", format="NETCDF4", engine="netcdf4", encoding=encoding)
+        print(f"Final dataset saved to {out_fp}\n")
 
     def save_output(self, df: pd.DataFrame, out_name: str) -> None:
         """Save output in specified format."""
