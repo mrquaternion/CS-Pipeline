@@ -1,41 +1,55 @@
 from enum import Enum
-from typing import Union
+from typing import Tuple
+
 
 class GeometryType(Enum):
     POINT = "Point"
+    LINESTRING = "LineString"
     POLYGON = "Polygon"
     MULTIPOLYGON = "MultiPolygon"
     UNKNOWN = "Unknown"
 
-class Geometry:
-    def __init__(self, data):
-        if not isinstance(data, list):
-            raise TypeError("Expected a list, but received a different type. Verify your JSON file.")
-        
-        self.depth = self._get_depth(data)
-        self.data = self._flatten(data) # Let's flatten the array beforehand
-        self.type_signature = self._get_type_signature(data)
-        self.geom_type = self._infer_geom_type()
 
-    def validate_coordinates(self, data):
+class Geometry:
+    def __init__(self, data = None):
+        self.original_depth = self._get_depth(data)
+        self.type_signature = self._get_type_signature(data)
+        self.geom_type = self._infer_geom_type(self.original_depth)  # ← inférer AVANT flatten
+
+        self.data, self.flattened_depth = self._flatten_to_max3(data)  # ← ne touche pas à original_depth
+        self.rect_region: list[float] | list[int] = [] # List of [float] || [int]
+
+    def validate_coordinates(self):
+       self._validation(self.data)
+
+    def _validation(self, data):
         if isinstance(data, list) and all(isinstance(item, (int, float)) for item in data):
             if len(data) != 2:
                 raise ValueError(f"Invalid coordinate pair. Expected 2 elements but received {len(data)}")
             return
         elif isinstance(data, list):
             for item in data:
-                self.validate_coordinates(item)
+                self._validation(item)
         else:
             raise TypeError(f"Invalid element in coordinate structure: {self.data}")
     
-    def _flatten(self, lst) -> list[list[list[Union[float, int]]]]:
-        depth = self.depth
+    def _flatten_to_max3(self, lst) -> Tuple[list, int]:
+        depth = self._get_depth(lst)
         result = lst
-        while depth > 3:
-            result = [item for subresult in result for item in subresult]
+        
+        # Don't flatten MultiPolygon structures
+        if depth == 4 and self.geom_type == GeometryType.MULTIPOLYGON:
+            return result, depth
+        
+        # Don't flatten Polygon structures  
+        if depth == 3 and self.geom_type == GeometryType.POLYGON:
+            return result, depth
+        
+        # Only flatten if we have excessive depth (>4) and it's not a recognized geometry type
+        while depth > 4:
+            result = [item for sub in result for item in sub]
             depth -= 1
-        self.depth = depth
-        return result
+        return result, depth
 
     def _get_depth(self, lst):
         if isinstance(lst, list) and lst:
@@ -54,15 +68,20 @@ class Geometry:
         else:
             return type(lst).__name__
 
-    def _infer_geom_type(self):
-        if self.depth == 1:
+    def _infer_geom_type(self, depth):
+        if depth == 1:
             return GeometryType.POINT
-        elif self.depth == 2:
+        elif depth == 2:
+            return GeometryType.LINESTRING
+        elif depth == 3:
             return GeometryType.POLYGON
-        elif self.depth == 3:
+        elif depth == 4:
             return GeometryType.MULTIPOLYGON
         else:
-            return "Unknown"
+            return GeometryType.UNKNOWN
         
     def __repr__(self):
-        return f"Geometry={self.geom_type}, depth={self.depth}, signature={self.type_signature}"
+        return (f"Geometry={self.geom_type}, "
+                f"original_depth={self.original_depth}, "
+                f"flattened_depth={self.flattened_depth}, "
+                f"signature={self.type_signature}")

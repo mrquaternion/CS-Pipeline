@@ -21,3 +21,5 @@ carbonpipeline/Processing/__pycache__/
 carbonpipeline/Geometry/__pycache__/
 ../.idea/
 .idea/
+geojsons/
+output_testing.csv

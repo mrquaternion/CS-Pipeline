@@ -137,3 +137,120 @@ PROCESSORS = {
     'CO2': dry_to_wet_co2_fraction,
     'WTD': lambda x: x
 }
+
+
+AGG_SCHEMA = {
+    # Temperature/pressure
+    "TA": {
+        "daily": {"TA_mean": "mean", "TA_std": "std", "TA_min": "min", "TA_max": "max"},
+        "monthly": {"TA_mean": "mean", "TA_std": "std", "TA_min": "min", "TA_max": "max"},
+    },
+    "PA": {
+        "daily": {"PA_mean": "mean"},
+        "monthly": {"PA_mean": "mean"},
+    },
+
+    # Precipitation
+    "P": {
+        "daily": {"P_sum": "sum", "P_max": "max"},
+        "monthly": {"P_sum": "sum", "P_max_daily": "max"},
+    },
+
+    # Humidity components
+    "RH": {
+        "daily": {"RH_mean": "mean", "RH_std": "std", "RH_max": "max", "RH_min": "min"},
+        "monthly": {"RH_mean": "mean", "RH_std": "std"},
+    },
+    "VPD": {
+        "daily": {"RH_mean": "mean", "VPD_std": "std", "VPD_max": "max"},
+        "monthly": {"VPD_mean": "mean", "VPD_std": "std"},
+    },
+
+    # Wind components
+    "WS": {
+        "daily": {"WS_mean": "mean", "WS_std": "std", "WS_max": "max"},
+        "monthly": {"WS_mean": "mean", "WS_std": "std"},
+    },
+    "WD": {
+        "daily": "DROP",
+        "monthly": "DROP",
+    },
+
+    # Radiation/energy
+    "SW_IN": {
+        "daily": {"SW_IN_mean": "mean", "SW_IN_std": "std", "SW_IN_total": "sum", "SW_IN_max": "max"},
+        "monthly": {"SW_IN_mean": "mean", "SW_IN_std": "std", "SW_IN_total": "sum"},
+    },
+    "SW_IN_POT": {
+        "daily": {"SW_IN_POT_total": "sum"},
+        "monthly": {"SW_IN_POT_total": "sum"},
+    },
+    "SW_OUT": {
+        "daily": {"SW_OUT_mean": "mean"},
+        "monthly": {"SW_OUT_mean": "mean"},
+    },
+    "LW_IN": {
+        "daily": {"LW_IN_mean": "mean"},
+        "monthly": {"LW_IN_mean": "mean"},
+    },
+    "LW_OUT": {
+        "daily": {"LW_OUT_mean": "mean"},
+        "monthly": {"LW_OUT_mean": "mean"},
+    },
+    "NETRAD": {
+        "daily": {"NETRAD_mean": "mean", "NETRAD_std": "std", "NETRAD_total": "sum"},
+        "monthly": {"NETRAD_mean": "mean", "NETRAD_std": "std", "NETRAD_total": "sum"},
+    },
+
+    # Fluxes
+    "LE": {
+        "daily": {"LE_mean": "mean", "LE_total": "sum"},
+        "monthly": {"LE_mean": "mean", "LE_total": "sum"},
+    },
+    "H": {
+        "daily": {"H_mean": "mean", "H_total": "sum"},
+        "monthly": {"H_mean": "mean", "H_total": "sum"},
+    },
+    "G": {
+        "daily": {"G_mean": "mean", "G_total": "sum"},
+        "monthly": {"G_mean": "mean", "G_total": "sum"},
+    },
+
+    # Turbulence/Light
+    "USTAR": {
+        "daily": {"USTAR_mean": "mean", "USTAR_max": "max"},
+        "monthly": {"USTAR_mean": "mean"},
+    },
+    "PPFD_IN": {
+        "daily": {"PPFD_IN_integral": "sum", "PPFD_IN_max": "max"},
+        "monthly": "DROP",
+    },
+    "PPFD_OUT": {
+        "daily": {"PPFD_OUT_integral": "sum"},
+        "monthly": "DROP",
+    },
+
+    # Soil water content
+    **{f"SWC_{k}": {
+        "daily": {f"SWC_{k}_mean": "mean", f"SWC_{k}_min": "min",
+                    f"SWC_{k}_delta": lambda s: s.iloc[-1] - s.iloc[0]},
+        "monthly": {f"SWC_{k}_mean": "mean", f"SWC_{k}_min": "min",
+                    f"SWC_{k}_delta": lambda s: s.iloc[-1] - s.iloc[0]},
+    } for k in range(1, 6)},
+
+    # Soil temperature
+    **{f"TS_{k}": {
+        "daily": {f"TS_{k}_mean": "mean", f"TS_{k}_min": "min", f"TS_{k}_max": "max"},
+        "monthly": {f"TS_{k}_mean": "mean", f"TS_{k}_min": "min", f"TS_{k}_max": "max"},
+    } for k in range(1, 6)},
+
+    # CO2/WTD
+    "CO2": {
+        "daily": {"CO2_mean": "mean"},
+        "monthly": {"CO2_mean": "mean"},
+    },
+    "WTD": {
+        "daily": {"WTD_mean": "mean"},
+        "monthly": {"WTD_mean": "mean"},
+    },
+}

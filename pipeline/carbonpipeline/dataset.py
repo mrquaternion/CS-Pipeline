@@ -6,6 +6,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
+from timezonefinder import TimezoneFinder
 from tqdm import tqdm
 import xarray as xr
 import rioxarray as rxr
@@ -21,6 +22,7 @@ class DatasetManager:
     
     def __init__(self, config: CarbonPipelineConfig):
         self.config = config
+        self.tz_finder = TimezoneFinder()
 
     def merge_unzipped(self, dirs: list[str]) -> Union[xr.Dataset, None]:
         paths = [p for d in dirs for p in glob.glob(os.path.join(d, "*.nc"))]
@@ -174,6 +176,66 @@ class DatasetManager:
         
         return xr.concat(datasets, dim="time") if datasets else None
 
+    def filter_coordinates(self, ds: xr.Dataset, regions: list[list[float]]):
+        ds_copy = ds.copy()
+
+        ds_lats = ds_copy.coords["latitude"].values
+        ds_lons = ds_copy.coords["longitude"].values
+
+        all_regions_to_retain = []
+        for region_id, (lat_max, lon_min, lat_min, lon_max) in enumerate(regions):
+            lat_max_era5 = self._nearest_point(lat_max, ds_lats)
+            lon_max_era5 = self._nearest_point(lon_max, ds_lons)
+            lat_min_era5 = self._nearest_point(lat_min, ds_lats, prev=lat_max_era5)
+            lon_min_era5 = self._nearest_point(lon_min, ds_lons, prev=lon_max_era5)
+
+            # 2. Sélectionner les données avec les coordonnées ERA5
+            lats = [lat_max_era5, lat_min_era5]
+            lons = [lon_max_era5, lon_min_era5]
+            rows_to_retain_for_corner = ds_copy.sel(latitude=lats,
+                                                    longitude=lons)
+            corresponding_df: pd.DataFrame = (
+                rows_to_retain_for_corner
+                .to_dataframe()
+                .reset_index()
+            )
+
+            # 3. Réassigner les coordonnées avec les vraies valeurs de la région
+            # Créer un mapping des coordonnées ERA5 vers les vraies coordonnées
+            coord_mapping = {
+                lat_max_era5: lat_max,
+                lat_min_era5: lat_min,
+                lon_max_era5: lon_max,
+                lon_min_era5: lon_min
+            }
+
+            # Appliquer le mapping
+            corresponding_df["latitude"] = corresponding_df["latitude"].map(
+                lambda x: coord_mapping.get(x, x)
+            )
+            corresponding_df["longitude"] = corresponding_df["longitude"].map(
+                lambda x: coord_mapping.get(x, x)
+            )
+
+            corresponding_df["region_id"] = region_id
+            corresponding_df = (
+                corresponding_df
+                .set_index(["region_id", "latitude", "longitude", "valid_time"])
+                .sort_index()
+            )
+
+            corresponding_ds = corresponding_df.to_xarray()
+            all_regions_to_retain.append(corresponding_ds)
+
+        return xr.concat(all_regions_to_retain, dim="region_id",
+                         join="override")  # pd.concat(all_regions_to_retain, axis=0)
+
+    @staticmethod
+    def _nearest_point(point: float | int, ds_points: np.ndarray, prev=None):
+        if prev is not None:
+            ds_points = ds_points[ds_points != prev]  # exclude prev safely
+        return ds_points[np.argmin(np.abs(ds_points - point))]
+
     def _match_to_closest(self, values, reference_points):
         """Match values to closest reference points."""
         reference_points = np.asarray(reference_points)
@@ -211,19 +273,40 @@ class DatasetManager:
         renamed_df.columns = pd.MultiIndex.from_tuples(tuples, names=["variable", "source"])
         return renamed_df.sort_index(axis=1, level="variable")
 
-    def write_chunks(self, ds: xr.Dataset, preds: list[str]) -> str:
-        """Write dataset in chunks."""
+    def write_chunks(self, ds: xr.Dataset, preds: list[str], index: list, processing_type) -> str:
+        """
+        Write dataset in chunks.
+
+        ⚠️ Note:
+        For non-"Global" processing, the `valid_time` conversion from UTC → local
+        timezone currently applies a **manual hotfix**:
+            - This is a temporary adjustment to realign the data to midnight local
+              time, but it is hiding a real offset issue that needs proper handling.
+              Depending on the timezone and region, this might not always be correct.
+        """
         tmp_dir = "./outputs_tmp"
         shutil.rmtree(tmp_dir, ignore_errors=True)
         os.makedirs(tmp_dir, exist_ok=True)
         processor = DataProcessor(self.config)
         # Process in larger time chunks for efficiency
-        for i in tqdm(range(ds.sizes['valid_time']), desc="Processing and writing chunks"):
-            chunk_ds = ds.isel(valid_time=slice(i, i + 1))
+        for i in tqdm(range(ds.sizes[index[0]]), desc="Processing and writing chunks"):
+            chunk_ds = ds.isel({index[0]: slice(i, i + 1)})
+            # Re-set to the appropriate timezone
+            lat = float(ds["latitude"].values[0])
+            lon = float(ds["longitude"].values[0])
+            tz_name = self.tz_finder.timezone_at(lat=lat, lng=lon)
+            if processing_type != "Global":
+                t_local = (pd.DatetimeIndex(chunk_ds["valid_time"].values)
+                           .tz_localize("UTC")
+                           .tz_convert(tz_name)
+                           - pd.Timedelta(hours=1)  # the hotfix
+                           ).tz_localize(None)
+                chunk_ds = chunk_ds.assign_coords(valid_time=("valid_time", t_local))
+
             chunk_df = chunk_ds.to_dataframe()
             
             # Ensure index is consistent
-            chunk_df = chunk_df.reset_index().set_index(['valid_time', 'latitude', 'longitude'])
+            chunk_df = chunk_df.reset_index().set_index(index)
 
             lookup = {p: processor.convert_ameriflux_to_era5(chunk_df, p) for p in preds}
             

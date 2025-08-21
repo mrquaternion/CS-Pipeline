@@ -131,11 +131,13 @@ class DataProcessor:
         dftz["timestamp"] = dftz["timestamp"].dt.tz_convert(tz)
         return dftz
 
-    def get_missing_groups(self, df: pd.DataFrame) -> list[tuple]:
+    @staticmethod
+    def get_missing_groups(df: pd.DataFrame) -> list[tuple]:
         """Get groups of missing data."""
         return [g for g, _ in df.groupby(["year", "month", "day", "time"])]
 
-    def get_hourly_groups(self, start: str, end: str) -> list[tuple]:
+    @staticmethod
+    def get_hourly_groups(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple]:
         """Generate hourly groups for the given time range."""
         hrs = pd.date_range(start=start, end=end, freq="h")
         return [(d.year, d.month, d.day, d.strftime('%H:%M:%S')) for d in hrs]

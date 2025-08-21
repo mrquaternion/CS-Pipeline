@@ -1,82 +1,188 @@
+from typing import List, Union
 from .geometry import Geometry, GeometryType
 
-class GeometryProcessor: 
+Coord = List[float]          # [lon, lat] ou [lat, lon]
+Ring = List[Coord]           # [[..., ...], ...]
+Polygon = List[Ring]         # [outer_ring, hole1, ...]
+MultiPolygon = List[Polygon] # [[ring...], [ring...]], ...
+
+class GeometryProcessor:
     @staticmethod
-    def process_geometry(data: list) -> tuple[Geometry, any]:
+    def process_geometry(geometry: Geometry) -> List[float]:
         """
-        Examples:
-            Point = [4.0, 3.6, 12.1, ...]
-            Polygon = [
-                            [4.0, 3.6, 12.1, ...],
-                            [1.9, 2.0, 2.4, ...],
-                            ...
-                        ]
-            MultiPolygon = [
-                                [
-                                    [4.0, 3.6, 12.1, ...],
-                                    [1.9, 2.0, 2.4, ...],
-                                    ...
-                                ],
-                                [
-                                    ...
-                                ],
-                                ...
-                            ]
+        Returns a rectangular region [N, W, S, E] (ERA5 style).
+
+        - POINT       -> [N, W, S, E] based on a small offset around the point
+        - POLYGON     -> [N, W, S, E] bounding box of the outer ring
+        - MULTIPOLYGON -> [N, W, S, E] bounding box covering all polygons
         """
-        geometry = Geometry(data=data)
-        print(geometry.type_signature)
-        geometry.validate_coordinates(data=data)
         match geometry.geom_type:
             case GeometryType.POINT:
                 region = GeometryProcessor._get_point_outer_bounds(geometry.data)
-                return (geometry, region)
+
             case GeometryType.POLYGON:
-                rect_region = GeometryProcessor._get_rect_region_covering_polygon(geometry.data)
-                return (geometry, rect_region)
+                region = GeometryProcessor._get_rect_region_covering_polygon(geometry.data)
+
             case GeometryType.MULTIPOLYGON:
-                rect_regions = GeometryProcessor._get_polys_regions(geometry.data)
-                return (geometry, rect_regions)
+                region = GeometryProcessor._get_polys_region(geometry.data)
+
             case GeometryType.UNKNOWN:
-                raise TypeError("Unsupported geometry depth.")
-        
-    @staticmethod
-    def _get_point_outer_bounds(point: list[float]) -> list[float]:
-        offset = 0.125
-        lat, lon = point
-        return [lat + offset, lon - offset, lat - offset, lon + offset]
+                raise TypeError("Unsupported geometry depth/type.")
+
+        # Validation
+        if len(region) != 4:
+            raise ValueError("Bounding box must have length 4 [N, W, S, E].")
+
+        return region
+
+    # --------------------------
+    # Helpers
+    # --------------------------
 
     @staticmethod
-    def _get_rect_region_covering_polygon(poly: list[list[float]]) -> list[float]:
+    def _infer_lonlat_indices(ring: Ring) -> tuple[int, int]:
         """
-        ERA5 asks for 4 points:
-            N = max latitude
-            W = min longitude
-            S= min latitude
-            E = max longitude
+        Determines if coordinates are [lon, lat] (GeoJSON standard)
+        or [lat, lon].
+
+        Heuristic:
+        - If all first values are within [-180, 180] and second values within [-90, 90],
+          assume [lon, lat].
+        - Otherwise assume [lat, lon].
         """
-        lons = [coord[0] for coord in poly]
-        lats = [coord[1] for coord in poly]
-        return [max(lats), min(lons), min(lats), max(lons)]
+        def looks_like_lon_lat(pt: Coord) -> bool:
+            return len(pt) >= 2 and abs(pt[0]) <= 180 and abs(pt[1]) <= 90
+
+        if ring and all(isinstance(p, list) and len(p) >= 2 for p in ring):
+            return (0, 1) if all(looks_like_lon_lat(p) for p in ring) else (1, 0)
+        raise ValueError("Ring malformed: expected list of [x, y] coordinates.")
 
     @staticmethod
-    def _get_polys_regions(polys: list[list[list[float]]]) -> tuple[dict[int, list[list[float]]], dict[int, list[float]]]:
+    def _normalize_outer_ring(poly_or_ring: Union[Ring, Polygon]) -> Ring:
         """
-            enum_polys = {
-                            1: [
-                                [lat, lon], 
-                                [lat, lon], 
-                                ...
-                            ]
-                        }
-            rect_regions = {
-                            1: [N, W, S, E], 
-                            2: [N, W, S, E], 
-                            ...
-                        }
+        Accepts:
+          - A ring: [[x, y], ...]
+          - A GeoJSON polygon: [[[x, y], ...], [hole1], ...]
+
+        Returns the outer ring only.
         """
-        rect_regions = {}
-        for i, poly in enumerate(polys):
-            # We find the 4 points that makes a rect covering the polygon
-            rect_regions[i] = GeometryProcessor._get_rect_region_covering_polygon(poly)
-        return rect_regions
-    
+        if not poly_or_ring:
+            raise ValueError("Empty polygon/ring.")
+
+        first = poly_or_ring[0]
+        # If first element is a point (numeric), we have a ring
+        if isinstance(first, list) and len(first) >= 2 and not isinstance(first[0], list):
+            ring = poly_or_ring  # type: ignore[assignment]
+        else:
+            # Otherwise, it’s a polygon (list of rings) -> take outer ring
+            ring = poly_or_ring[0]  # type: ignore[index]
+
+        if not ring or not isinstance(ring[0], list) or len(ring[0]) < 2:
+            raise ValueError("Outer ring malformed.")
+
+        return ring  # type: ignore[return-value]
+
+    @staticmethod
+    def _get_point_outer_bounds(point: List[float]) -> List[float]:
+        """
+        Build a small rectangle around a point.
+
+        Returns [N, W, S, E] where:
+          - N/S = lat +/- offset
+          - W/E = lon +/- offset
+        """
+        if not isinstance(point, list) or len(point) < 2:
+            raise ValueError("Point malformed: expected [lat, lon] or [lon, lat].")
+
+        # Try to be permissive with ordering
+        lat, lon = point[0], point[1]
+        # If looks like [lon, lat], swap
+        if abs(lat) <= 180 and abs(lon) <= 90:
+            lon, lat = lat, lon
+
+        offset = 0.125  # degrees
+        N = lat + offset
+        S = lat - offset
+        W = lon - offset
+        E = lon + offset
+        return [N, W, S, E]
+
+    @staticmethod
+    def _ensure_min_bbox_size(region: List[float], min_delta: float = 0.25) -> List[float]:
+        """
+        Ensure that a bounding box [N, W, S, E] has at least `min_delta`
+        degrees difference in both latitude and longitude.
+
+        If the span is smaller, the box is expanded symmetrically around its center
+        to meet the minimum required size.
+        """
+        N, W, S, E = region
+        lat_delta = abs(N - S)
+        lon_delta = abs(E - W)
+
+        # Adjust latitude span
+        if lat_delta < min_delta:
+            center_lat = (N + S) / 2
+            half = min_delta / 2
+            N = center_lat + half
+            S = center_lat - half
+
+        # Adjust longitude span
+        if lon_delta < min_delta:
+            center_lon = (E + W) / 2
+            half = min_delta / 2
+            E = center_lon + half
+            W = center_lon - half
+
+        return [N, W, S, E]
+
+    @staticmethod
+    def _get_rect_region_covering_polygon(poly_or_ring: Union[Ring, Polygon]) -> List[float]:
+        """
+        Compute the ERA5 bounding box [N, W, S, E] for a Polygon.
+        Accepts either a ring or a GeoJSON polygon (outer ring is used).
+        """
+        ring = GeometryProcessor._normalize_outer_ring(poly_or_ring)
+        lon_i, lat_i = GeometryProcessor._infer_lonlat_indices(ring)
+
+        lons = [p[lon_i] for p in ring]
+        lats = [p[lat_i] for p in ring]
+
+        N = max(lats)
+        S = min(lats)
+        W = min(lons)
+        E = max(lons)
+
+        region = [N, W, S, E]
+        return GeometryProcessor._ensure_min_bbox_size(region)
+
+    @staticmethod
+    def _get_polys_region(polys: MultiPolygon) -> List[float]:
+        """
+        Compute a single ERA5 bounding box [N, W, S, E] that covers
+        all polygons in a MultiPolygon.
+        Each polygon is represented as [outer_ring, holes...].
+        """
+        if not isinstance(polys, list) or not polys:
+            raise ValueError("MultiPolygon malformed or empty.")
+
+        all_lons = []
+        all_lats = []
+
+        for poly in polys:
+            ring = GeometryProcessor._normalize_outer_ring(poly)
+            lon_i, lat_i = GeometryProcessor._infer_lonlat_indices(ring)
+
+            lons = [p[lon_i] for p in ring]
+            lats = [p[lat_i] for p in ring]
+
+            all_lons.extend(lons)
+            all_lats.extend(lats)
+
+        N = max(all_lats)
+        S = min(all_lats)
+        W = min(all_lons)
+        E = max(all_lons)
+
+        region = [N, W, S, E]
+        return GeometryProcessor._ensure_min_bbox_size(region)

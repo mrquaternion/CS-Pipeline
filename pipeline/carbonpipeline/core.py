@@ -3,15 +3,17 @@ import json
 import os
 from pathlib import Path
 import shutil
-import xarray as xr
 
+import numpy as np
 import pandas as pd
+import xarray as xr
 
 from .Geometry.geometry import Geometry
 from .config import CarbonPipelineConfig
 from .Processing.processor import DataProcessor
 from .downloader import DataDownloader
 from .dataset import DatasetManager
+from .Processing.processing_utils import AGG_SCHEMA
 
 
 class CarbonPipeline:
@@ -25,52 +27,73 @@ class CarbonPipeline:
 
     async def run_download(
         self,
-        coords: list[float],
+        coords_to_download: list[float],
         region_id: str,
         geometry: Geometry,
         start: str,
         end: str,
         preds: list[str],
-        vars_: list[str],
-        threshold_activated: bool,
-        rect_regions: list[list[float]]
+        vrs: list[str],
+        regions_to_process: list[list[float]] | list[float],
+        processing_type: str,
+        aggregation_type: str
     ) -> None:
         """
         Downloads ERA5 datasets for a specified area and time range.
         """
-        start_adj, end_adj = self.processor.adjust_timezone_str(coords, start, end)
-        groups = self.processor.get_hourly_groups(start_adj, end_adj)
-        unzip_dirs = await self.downloader.download_groups_async(groups, vars_, coords, region_id)
+        if processing_type != "Global":
+            start_adj, end_adj = self.processor.adjust_timezone_str(coords_to_download, start, end)
+        else:
+            start_adj = pd.to_datetime(start, errors="coerce")
+            end_adj = pd.to_datetime(end, errors="coerce")
+            if pd.isna(start_adj) or pd.isna(end_adj):
+                raise ValueError(f"Invalid dates: start={start}, end={end}")
 
-        manifest_data = {
+        groups = self.processor.get_hourly_groups(start_adj, end_adj)
+        unzip_dirs = await self.downloader.download_groups_async(groups, vrs, coords_to_download, region_id)
+
+        feature_entry = {
             "region_id": region_id,
-            "preds": preds, 
-            "unzip_sub_folders": unzip_dirs,
-            "start_date": start, 
+            "start_date": start,
             "end_date": end,
             "geometry": geometry.geom_type.value,
-            "threshold_activated": threshold_activated,
-            "rect_regions": rect_regions
+            "unzip_sub_folders": unzip_dirs,
+            "preds": preds,
+            "rect_regions": regions_to_process,
         }
 
         manifest_path = Path(self.config.OUTPUT_MANIFEST)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Load or init manifest
         if manifest_path.is_file():
-            with open(manifest_path, 'r') as fp:
+            with open(manifest_path, "r") as fp:
                 try:
                     manifest = json.load(fp)
-                    if not isinstance(manifest, dict) or "features" not in manifest:
-                        manifest = {"features": []}
+                    if not isinstance(manifest, dict):
+                        manifest = {}
                 except json.JSONDecodeError:
-                    manifest = {"features": []}
+                    manifest = {}
         else:
-            manifest = {"features": []}
+            manifest = {}
 
-        manifest['features'].append(manifest_data)
+        # Clean old per-feature keys (optional)
+        for f in manifest.get("features", []):
+            f.pop("processing_type", None)
+            f.pop("aggregation_type", None)
+
+        # Rebuild the object with desired key order:
+        features = manifest.get("features", [])
+        features.append(feature_entry)
+
+        ordered_manifest = {
+            "processing_type": processing_type,
+            "aggregation_type": aggregation_type,
+            "features": features
+        }
 
         with open(manifest_path, 'w') as fp:
-            json.dump(manifest, fp, indent=2)
+            json.dump(ordered_manifest, fp, indent=2)
 
         print(f"Appended new entry to manifest at {manifest_path}")
 
@@ -80,7 +103,10 @@ class CarbonPipeline:
         preds: list[str],
         start: str,
         end: str,
-        output_name: str
+        rect_regions: list[list[float]],
+        output_name: str,
+        processing_type: str,
+        aggregation_type: str
     ) -> None:
         """Process area data from manifest."""
         print(f"For {output_name}:")
@@ -104,9 +130,54 @@ class CarbonPipeline:
             #print("After WTD addition:")
             #print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())
 
-        tmp_dir = self.dataset_manager.write_chunks(merged_ds, preds)
+        if processing_type == "BoundingBox":
+            merged_ds = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
+            index = ['region_id', 'latitude', 'longitude', 'valid_time']
+        else:
+            index = ['valid_time', 'latitude', 'longitude']
+
+        tmp_dir = self.dataset_manager.write_chunks(merged_ds, preds, index, processing_type)
         self.dataset_manager.concat_chunks(tmp_dir, output_name)
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        # Aggregation --> not available for global option because too much data --> not optimized with chunk loading
+        resample_methods = {"DAILY": "1D", "MONTHLY": "1ME"}
+        if aggregation_type in resample_methods.keys():
+            while True:
+                user_input = input("\nDo you want to delete the original file after aggregation? (Y/n): ").strip()
+                if user_input.upper() == "Y":
+                    delete_source = True
+                    break
+                elif user_input.lower() == "n":
+                    delete_source = False
+                    break
+                else:
+                    print("Invalid input: please enter 'Y' to delete them, or 'n' to keep them.")
+
+            ds = self.open_nc(output_name)
+
+            variables = list(ds.data_vars.keys())
+            filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
+            agg_ds = xr.Dataset({
+                name: getattr(
+                    ds[pred].resample(valid_time=resample_methods[aggregation_type]),
+                    func
+                )()
+                for pred, agg_types in filtered_agg_schema.items()
+                for agg_dict in [agg_types.get(aggregation_type.lower(), {})]
+                if agg_dict != "DROP"
+                for name, func in agg_dict.items()
+            })
+            if aggregation_type == "MONTHLY":
+                agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
+
+            save_path = self.write_aggregated_ds(
+                agg_ds=agg_ds,
+                output_name=output_name,
+                aggregation_type=aggregation_type,
+                delete_source=delete_source
+            )
+            print(f"✅ Aggregation saved to {save_path}")
 
     def run_point_process(
         self,
@@ -155,18 +226,58 @@ class CarbonPipeline:
         if dfr is not None:
             self.dataset_manager.save_output(dfr, output_name)
 
-    def load_features_from_manifest(self) -> tuple[list[str], list[str], str, str]:
+    def load_features_from_manifest(self):
         """Load manifest file"""
         with open(self.config.OUTPUT_MANIFEST, "r") as fp:
             content = json.load(fp)
-        return content["features"]
+        return content
 
-    def setup_manifest_and_dirs(self, manifest, *dirs) -> None:
+    def open_nc(self, output_name: str) -> xr.Dataset:
+        fname = f"{output_name}.nc"
+        path = Path(self.config.OUTPUT_PROCESSED_DIR) / fname
+        ds = xr.open_dataset(path, decode_times=True)
+        return ds
+
+    def write_aggregated_ds(
+        self,
+        agg_ds: xr.Dataset,
+        output_name: str,
+        aggregation_type: str,
+        delete_source: bool,
+    ) -> Path:
+        path = Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}_{aggregation_type.lower()}.nc"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Overwrite if exists
+        if path.exists():
+            print(f"⚠️ Overwriting existing aggregated file: {path}")
+            path.unlink()
+
+        encoding = {}
+        for v in agg_ds.data_vars:
+            enc = {"zlib": True, "complevel": 4}
+            # If float64 isn't required, store as float32 to cut size in half
+            if str(agg_ds[v].dtype).startswith("float64"):
+                enc["dtype"] = np.float32
+            encoding[v] = enc
+
+        agg_ds.to_netcdf(path, encoding=encoding, engine="netcdf4")
+
+        if delete_source:
+            src = Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}.nc"
+            try:
+                src.unlink()
+            except FileNotFoundError:
+                pass
+
+        return path
+
+    @staticmethod
+    def setup_manifest_and_dirs(manifest, *dirs) -> None:
         """Setup directories by removing and recreating them."""
-        if manifest:
-            manifest_path = Path(manifest)
-            if manifest_path.exists():
-                manifest_path.unlink() # deletes the manifest at each run
+        manifest_path = Path(manifest)
+        if manifest_path.exists():
+            manifest_path.unlink() # deletes the manifest at each run
 
         for d in dirs:
             shutil.rmtree(d, ignore_errors=True)
