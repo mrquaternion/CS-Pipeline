@@ -157,24 +157,32 @@ class DataDownloader:
                 self._extract_zip(zip_fp, unzip_fp)
         return fldrs
 
+    @staticmethod
     def _prepare_group_request(
-            self, 
-            group: tuple, 
-            dir_: str, 
-            coords: list[float], 
-            vars_: list[str]
+        group: tuple,
+        dir_: str,
+        coords: list[float],
+        vars_: list[str]
     ) -> str:
         """
-        Queries data for a specific date and location, then downloads the results.
+        Queries data for a specific date range and location, then downloads the results.
+        Group is in the form (year, months, days, hours).
         """
-        Y, M, D, t = group
-        request = APIRequest(year=str(Y), month=f"{int(M):02d}", day=f"{int(D):02d}",
-                            time=str(t),
-                            coords=coords, vars_=vars_)
-        
+        Y, months, days, hours = group
+
+        request = APIRequest(
+            year=str(Y),
+            month=months,   # now a list
+            day=days,       # now a list
+            time=hours,     # now a list
+            coords=coords,
+            vars_=vars_
+        )
+
         return request.query_era5(dir_)
 
-    def _extract_zip(self, zip_fp: str, unzip_fp: str) -> None:
+    @staticmethod
+    def _extract_zip(zip_fp: str, unzip_fp: str) -> None:
         """
         Extracts all files from a ZIP archive to a specified directory.
         """

@@ -250,7 +250,8 @@ class DatasetManager:
         }
         return ds.rename(rename_dict)
 
-    def build_multiindex_dataframe(self, df: pd.DataFrame, preds: list[str]) -> pd.DataFrame:
+    @staticmethod
+    def build_multiindex_dataframe(df: pd.DataFrame, preds: list[str]) -> pd.DataFrame:
         """
         Restructures a DataFrame to have a MultiIndex for AmeriFlux vs ERA5 data.
         """
@@ -292,15 +293,18 @@ class DatasetManager:
         for i in tqdm(range(ds.sizes[index[0]]), desc="Processing and writing chunks"):
             chunk_ds = ds.isel({index[0]: slice(i, i + 1)})
             # Re-set to the appropriate timezone
-            lat = float(ds["latitude"].values[0])
-            lon = float(ds["longitude"].values[0])
+            lat = float(chunk_ds["latitude"].values[0])
+            print(chunk_ds.to_dataframe())
+            print(f"Latitude of the region first point: {lat}")
+            lon = float(chunk_ds["longitude"].values[0])
             tz_name = self.tz_finder.timezone_at(lat=lat, lng=lon)
             if processing_type != "Global":
                 t_local = (pd.DatetimeIndex(chunk_ds["valid_time"].values)
-                           .tz_localize("UTC")
-                           .tz_convert(tz_name)
-                           - pd.Timedelta(hours=1)  # the hotfix
+                               .tz_localize(tz_name)
+                               .tz_convert("UTC")
+                               #- pd.Timedelta(hours=1)  # the hotfix
                            ).tz_localize(None)
+
                 chunk_ds = chunk_ds.assign_coords(valid_time=("valid_time", t_local))
 
             chunk_df = chunk_ds.to_dataframe()

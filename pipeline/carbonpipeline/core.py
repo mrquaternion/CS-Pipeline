@@ -34,22 +34,24 @@ class CarbonPipeline:
         end: str,
         preds: list[str],
         vrs: list[str],
-        regions_to_process: list[list[float]] | list[float],
+        regions_to_process: dict[str | int, list[float]],
         processing_type: str,
-        aggregation_type: str
+        aggregation_type: str,
+        tz_aware: bool
     ) -> None:
         """
         Downloads ERA5 datasets for a specified area and time range.
         """
-        if processing_type != "Global":
+        if processing_type != "Global" and tz_aware:
             start_adj, end_adj = self.processor.adjust_timezone_str(coords_to_download, start, end)
+            print(start_adj, end_adj)
         else:
             start_adj = pd.to_datetime(start, errors="coerce")
             end_adj = pd.to_datetime(end, errors="coerce")
             if pd.isna(start_adj) or pd.isna(end_adj):
                 raise ValueError(f"Invalid dates: start={start}, end={end}")
 
-        groups = self.processor.get_hourly_groups(start_adj, end_adj)
+        groups = self.processor.get_request_groups(start_adj, end_adj)
         unzip_dirs = await self.downloader.download_groups_async(groups, vrs, coords_to_download, region_id)
 
         feature_entry = {
@@ -81,6 +83,7 @@ class CarbonPipeline:
         for f in manifest.get("features", []):
             f.pop("processing_type", None)
             f.pop("aggregation_type", None)
+            f.pop("timezone_aware", None)
 
         # Rebuild the object with desired key order:
         features = manifest.get("features", [])
@@ -89,6 +92,7 @@ class CarbonPipeline:
         ordered_manifest = {
             "processing_type": processing_type,
             "aggregation_type": aggregation_type,
+            "timezone_aware": tz_aware,
             "features": features
         }
 
@@ -235,7 +239,7 @@ class CarbonPipeline:
     def open_nc(self, output_name: str) -> xr.Dataset:
         fname = f"{output_name}.nc"
         path = Path(self.config.OUTPUT_PROCESSED_DIR) / fname
-        ds = xr.open_dataset(path, decode_times=True)
+        ds = xr.open_dataset(path, decode_times=True).load()
         return ds
 
     def write_aggregated_ds(
@@ -252,6 +256,11 @@ class CarbonPipeline:
         if path.exists():
             print(f"⚠️ Overwriting existing aggregated file: {path}")
             path.unlink()
+
+        if "valid_time" in agg_ds.coords:
+            agg_ds = agg_ds.assign_coords(
+                valid_time=("valid_time", np.array(agg_ds["valid_time"].values, dtype="datetime64[ns]"))
+            )
 
         encoding = {}
         for v in agg_ds.data_vars:

@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
+from fontTools.ttLib.woff2 import bboxFormat
+
 from .argparser import ArgumentParserManager
 from .Geometry.geometry_processor import GeometryProcessor
 from .Geometry.geometry import Geometry, GeometryType
@@ -54,6 +56,7 @@ class ProcessingType(Enum):
 class CommandExecutor:
     def __init__(self, config_dict: dict):
         self.pipeline = CarbonPipeline()
+
         self.action = config_dict.get("action")
         self.output_suffix = config_dict.get("output-filename")
         self.data_file = config_dict.get("data-file")
@@ -62,8 +65,14 @@ class CommandExecutor:
         self.end = config_dict.get("end")
         self.preds = config_dict.get("preds")
         self.aggregation_type = config_dict.get("aggregation-type")
-        self.geometries: list[Geometry] = []
-        self.global_geometry: list[Geometry] | None = None
+        tz_val = config_dict.get("timezone-aware")
+        if not isinstance(tz_val, bool):
+            raise ValueError("timezone-aware must be YES or NO (boolean).")
+        self.tz_aware = tz_val
+        self.id_field = config_dict.get("id-field")
+
+        self.geometries_per_file: list[dict[str | int, Geometry]] = []
+        self.bounding_boxes_geometry: dict[Geometry, dict[str | int, list[float]]] = {}
         self.special_preds: SpecialPredictors | None = None # SpecialPredictors object
         self.vars: list[str] | None = None # List of variables to download from ERA5
         self.processing_type: ProcessingType
@@ -131,22 +140,17 @@ class CommandExecutor:
 
         # Download ERA5 data sequentially for each region (to avoid CDS conflicts)
         if self.processing_type == ProcessingType.BOX:
-            for geometry_idx, geometry in enumerate(self.global_geometry):
+            for geometry_idx, geometry in enumerate(self.bounding_boxes_geometry):
                 region = geometry.rect_region
                 region_id = CommandExecutor._generate_region_id(region, geometry_idx)
-                await self._download_for_region(geometry, region, region_id, self._all_rect_regions())
+                await self._download_for_region(geometry, region, region_id, self.bounding_boxes_geometry[geometry])
         else:
-            for geometry_idx, geometry in enumerate(self.geometries):
-                region = geometry.rect_region
-                region_id = CommandExecutor._generate_region_id(region, geometry_idx)
-                await self._download_for_region(geometry, region, region_id, region)
-
-        """
-        for geometry_idx, geometry in enumerate(geometries):
-            region = geometry.rect_region
-            region_id = CommandExecutor._generate_region_id(region, geometry_idx)
-            await self._download_for_region(geometry, region, region_id)
-        """
+            for geometries_dict in self.geometries_per_file:
+                for geometry_idx, geometry_geojson_idx in enumerate(geometries_dict):
+                    geometry = geometries_dict[geometry_geojson_idx]
+                    region = geometry.rect_region
+                    region_id = CommandExecutor._generate_region_id(region, geometry_idx)
+                    await self._download_for_region(geometry, region, region_id, {geometry_geojson_idx: region})
 
     def _processing_step(self):
         """
@@ -233,22 +237,26 @@ class CommandExecutor:
                 global_earth_bounding_box = [90, -180, -90, 180]
                 geometry = Geometry()
                 geometry.rect_region = global_earth_bounding_box
-                self.geometries = [geometry]
+                self.geometries_per_file = [{1: geometry}]
                 self.processing_type = ProcessingType.GLOBAL
-            # If dir is given
+            # If directory with GeoJSONS is given
             else:
-                self.geometries = self._parse_geojsons()
-                for geo in self.geometries:
-                    geo.rect_region = GeometryProcessor.process_geometry(geo)
+                self.geometries_per_file = self._parse_geojsons()
+                number_of_polygons = 0
+                for geometries_dict in self.geometries_per_file:
+                    for _, geometry in geometries_dict.items():
+                        geometry.rect_region = GeometryProcessor.process_geometry(geometry)
+                        number_of_polygons += 1
+                total_requests_polygons = number_of_polygons * self.number_requests_per_region
 
-                total_requests_polygons = len(self.geometries) * self.number_requests_per_region
-                total_requests_box = self.number_requests_per_region
+                number_of_regions = len(self.geometries_per_file)
+                total_requests_boxes = number_of_regions * self.number_requests_per_region
 
                 print("\n--------------------------------------------")
                 print("You have two options for ERA5 extraction:\n")
                 print("1) Merge all polygons into a single global covering region (Y)")
                 print("   - Output: one single NetCDF file (smaller storage footprint).")
-                print(f"   - Fewer requests to ERA5 (only {total_requests_box} requests).")
+                print(f"   - Fewer requests to ERA5 (only {total_requests_boxes} requests).")
                 print("   - Faster to download, less risk of exceeding your CDS requests quota.")
                 print("   - Important: ensure all polygons are in the SAME region/timezone.")
                 print("     Otherwise, aggregations aligned to local time may be offset when")
@@ -269,10 +277,15 @@ class CommandExecutor:
                         "\nDo you want to merge all polygons into a single bounding-box region? (Y/n): ").strip()
 
                     if user_input.upper() == "Y":
-                        geometry = Geometry()
-                        geometry.rect_region = self._find_global_covering_region()
-                        self.global_geometry = [geometry]
-                        self.processing_type = ProcessingType.BOX  # let know the pipeline to download in the manifest
+                        for geometries_dict in self.geometries_per_file:
+                            geometry = Geometry()
+                            geometries_objs = list(geometries_dict.values())
+                            geometry.rect_region = self._find_covering_regions(geometries_objs)
+                            self.bounding_boxes_geometry[geometry] = { # len() will be the number of GeoJSON files
+                                id_geo: geo.rect_region
+                                for id_geo, geo in geometries_dict.items()
+                            }
+                            self.processing_type = ProcessingType.BOX  # let know the pipeline to download in the manifest
                         break
                     elif user_input.lower() == "n":
                         self.processing_type = ProcessingType.POLYGONS
@@ -339,51 +352,60 @@ class CommandExecutor:
         path = Path(self.coords_dir)
 
         # If the provided path is a directory
-        geometry_collection: list = []
+        geometries_per_file: list = []
         if path.is_dir():
+            missing_counter = 1
             for file_path in sorted(path.iterdir()):
                 # Only consider files with recognised extensions
                 if file_path.suffix not in (".geojson", ".json"):
                     continue
+                geometries: list = []
                 with open(file_path, "r") as f:
                     json_dict = json.load(f)
                     if not json_dict.get("features"):
                         raise ValueError(f"No features found in GeoJSON file: {file_path}")
                     features = json_dict["features"]
-                    #print(f"\nNumber of features?: {len(features)}")
 
+                    geometries_dict: dict[str | int, Geometry]= {}
                     for feature in features:
-                        geometry_type = feature["geometry"]["type"]
-                        coordinates = feature["geometry"]["coordinates"]
+                        props = feature.get("properties", {})
+                        if self.id_field in props:
+                            id_geo = props[self.id_field]
+                        else:
+                            id_geo = missing_counter
+                            missing_counter += 1
 
+                        coordinates = feature["geometry"]["coordinates"]
                         geometry = Geometry(data=coordinates)
                         geometry.validate_coordinates()
-                        geometry_collection.append(geometry)
+                        geometries_dict[id_geo] = geometry
+                        geometries.append(geometry)
 
-                        #print(f"\nGeoJSON type: {geometry_type}")
-                        #print(f"Processed type: {geometry.geom_type}, type signature: {geometry.type_signature}")
-
-            if not geometry_collection:
+                    geometries_per_file.append(geometries_dict)
+            if not geometries_per_file:
                 raise ValueError(f"No valid GeoJSON files found in directory: {path}")
-        return geometry_collection
+        return geometries_per_file
 
-    def _find_global_covering_region(self) -> list[float]:
-        rects = self._all_rect_regions()
+    def _find_covering_regions(self, geometries: list[Geometry]) -> list[float]:
+        rects = self._all_rect_regions(geometries)
+
         if not rects:
             raise ValueError("No rect regions available to build a global covering region.")
-        max_lat = max(r[0] for r in rects)  # N
-        min_lon = min(r[1] for r in rects)  # W
-        min_lat = min(r[2] for r in rects)  # S
-        max_lon = max(r[3] for r in rects)  # E
-        return [max_lat, min_lon, min_lat, max_lon]
 
-    def _all_rect_regions(self) -> list[list[float]]:
+        N = max(r[0] for r in rects)
+        W = min(r[1] for r in rects)
+        S = min(r[2] for r in rects)
+        E = max(r[3] for r in rects)
+        return [N, W, S, E]
+
+    @staticmethod
+    def _all_rect_regions(geometries: list[Geometry]):
         return [
             g.rect_region
-            for g in self.geometries
+            for g in geometries
         ]
 
-    async def _download_for_region(self, geometry, region, region_id, regions_to_process):
+    async def _download_for_region(self, geometry, region, region_id, regions_to_process: dict[str | int, list[float]]):
         """Download ERA5 data for a single region. Runs sequentially to avoid CDS conflicts."""
         print(f"⬇️ Downloading ERA5 data for {region_id}...")
         await self.pipeline.run_download(
@@ -396,7 +418,8 @@ class CommandExecutor:
             vrs=self.vars,
             regions_to_process=regions_to_process,
             processing_type=self.processing_type.value,
-            aggregation_type=self.aggregation_type
+            aggregation_type=self.aggregation_type,
+            tz_aware=self.tz_aware
         )
                 
 
