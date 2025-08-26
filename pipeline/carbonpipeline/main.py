@@ -65,10 +65,6 @@ class CommandExecutor:
         self.end = config_dict.get("end")
         self.preds = config_dict.get("preds")
         self.aggregation_type = config_dict.get("aggregation-type")
-        tz_val = config_dict.get("timezone-aware")
-        if not isinstance(tz_val, bool):
-            raise ValueError("timezone-aware must be YES or NO (boolean).")
-        self.tz_aware = tz_val
         self.id_field = config_dict.get("id-field")
 
         self.geometries_per_file: list[dict[str | int, Geometry]] = []
@@ -95,9 +91,17 @@ class CommandExecutor:
 
     @property
     def number_requests_per_region(self):
+        """
+        Compute number of CDS requests per region dynamically.
+        Uses grouping logic instead of raw hour-difference.
+        """
         start = self._parse_datetime(self.start)
         end = self._parse_datetime(self.end)
-        return int((end - start).total_seconds() // 3600) + 1
+
+        # Ask processor to build request groups
+        groups = self.pipeline.processor.get_request_groups(start, end, self.aggregation_type == "MONTHLY")
+
+        return len(groups)
 
     # Only callable function
     async def run(self):
@@ -258,9 +262,6 @@ class CommandExecutor:
                 print("   - Output: one single NetCDF file (smaller storage footprint).")
                 print(f"   - Fewer requests to ERA5 (only {total_requests_boxes} requests).")
                 print("   - Faster to download, less risk of exceeding your CDS requests quota.")
-                print("   - Important: ensure all polygons are in the SAME region/timezone.")
-                print("     Otherwise, aggregations aligned to local time may be offset when")
-                print("     using a single covering box for the request.")
                 print("   - Downside: for large polygons, precision is reduced because only")
                 print("     the bounding box corners are kept.")
                 print()
@@ -419,7 +420,6 @@ class CommandExecutor:
             regions_to_process=regions_to_process,
             processing_type=self.processing_type.value,
             aggregation_type=self.aggregation_type,
-            tz_aware=self.tz_aware
         )
                 
 

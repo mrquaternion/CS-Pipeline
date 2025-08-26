@@ -119,7 +119,7 @@ class DataProcessor:
             if pd.isna(dt):
                 raise ValueError(f"Date invalide : {date}")
             # Application du fuseau horaire
-            dt = dt.tz_localize(tz).tz_convert("UTC").tz_localize(None)
+            dt = dt.tz_localize("UTC").tz_convert(tz).tz_localize(None)
             result.append(dt)
         return result
 
@@ -137,7 +137,74 @@ class DataProcessor:
         return [g for g, _ in df.groupby(["year", "month", "day", "time"])]
 
     @staticmethod
-    def get_hourly_groups(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple]:
-        """Generate hourly groups for the given time range."""
-        hrs = pd.date_range(start=start, end=end, freq="h")
-        return [(d.year, d.month, d.day, d.strftime('%H:%M:%S')) for d in hrs]
+    def get_request_groups(start: pd.Timestamp, end: pd.Timestamp, monthly: bool) -> list[tuple]:
+        """
+        Generate groups dynamically for ERA5 requests.
+        - If monthly=False → hourly/daily ERA5:
+            - Full months if possible
+            - Full days if possible
+            - Otherwise: exact hourly slices
+            Returns (year:str, month:str, days:list[str], hours:list[str])
+        - If monthly=True → ERA5 monthly means:
+            - Full years if possible
+            - Full months if possible
+            - Otherwise: fallback to days
+            Returns (year:str, months:list[str], days:list[str], hours:list[str])
+        """
+        start = pd.to_datetime(start)
+        end = pd.to_datetime(end)
+        groups: list[tuple] = []
+        full_hours = [f"{h:02d}:00" for h in range(24)]
+
+        if monthly:
+            # ----------- MONTHLY MEANS LOGIC -----------
+            # Case 1: full years
+            if (start.month, start.day, start.hour) == (1, 1, 0) and (end.month, end.day, end.hour) == (12, 31, 23):
+                for year in range(start.year, end.year + 1):
+                    months = [f"{m:02d}" for m in range(1, 13)]
+                    days = [f"{d:02d}" for d in range(1, 32)]  # tolerated by CDS
+                    groups.append((str(year), months, days, full_hours))
+                return groups
+
+            # Case 2: full months
+            months = pd.period_range(start=start, end=end, freq="M")
+            for month in months:
+                month_start, month_end = month.start_time, month.end_time
+                if start <= month_start and end >= month_end:
+                    from calendar import monthrange
+                    n_days = monthrange(month.year, month.month)[1]
+                    days = [f"{d:02d}" for d in range(1, n_days + 1)]
+                    groups.append((str(month.year), [f"{month.month:02d}"], days, full_hours))
+            return groups
+
+        else:
+            # ----------- HOURLY/DAY LOGIC -----------
+            months = pd.period_range(start=start, end=end, freq="M")
+            for month in months:
+                month_start, month_end = month.start_time, month.end_time
+                m_start, m_end = max(start, month_start), min(end, month_end)
+                if m_start > m_end:
+                    continue
+
+                # Case 1: full month
+                if m_start.floor("h") == month_start and m_end.floor("h") >= month_end.floor("h"):
+                    from calendar import monthrange
+                    n_days = monthrange(month.year, month.month)[1]
+                    days = [f"{d:02d}" for d in range(1, n_days + 1)]
+                    groups.append((str(month.year), f"{month.month:02d}", days, full_hours))
+                    continue
+
+                # Case 2: per day
+                days_range = pd.date_range(start=m_start.floor("D"), end=m_end.floor("D"), freq="D")
+                for d in days_range:
+                    y, mo, da = d.year, f"{d.month:02d}", f"{d.day:02d}"
+                    h0 = m_start.hour if d == days_range[0] else 0
+                    h1 = m_end.hour if d == days_range[-1] else 23
+                    h0, h1 = max(0, min(23, h0)), max(0, min(23, h1))
+                    if h0 > h1:
+                        continue
+                    hours = [f"{h:02d}:00" for h in range(h0, h1 + 1)]
+                    groups.append((str(y), mo, [da], hours))
+
+            return groups
+

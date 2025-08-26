@@ -121,27 +121,29 @@ class DataDownloader:
             print(f"Failed to download {url}: {e}")
 
     async def download_groups_async(
-            self, 
-            groups: list[tuple], 
-            vars_: list[str], 
-            coords: list[float],
-            region_id: str = None
+        self,
+        groups: list[tuple],
+        vars_: list[str],
+        coords: list[float],
+        monthly: bool,
+        region_id: str = None
     ) -> list[str]:
         """Asynchronous wrapper for download_groups using a background thread."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.download_groups, groups, vars_, coords, region_id)
+        return await loop.run_in_executor(None, self.download_groups, groups, vars_, coords, monthly, region_id)
 
     def download_groups(
-            self, 
-            groups: list[tuple], 
-            vars_: list[str], 
-            coords: list[float],
-            region_id: str = None 
+        self,
+        groups: list[tuple],
+        vars_: list[str],
+        coords: list[float],
+        monthly: bool,
+        region_id: str = None,
     ) -> list[str]:
         """Download data for multiple groups."""
         fldrs = [] 
-        for group in tqdm(groups, desc="Downloading hourly data", unit="hour", colour="green"):
-            fname = self._prepare_group_request(group, self.config.ZIP_DIR, coords, vars_)
+        for group in tqdm(groups, desc="Downloading hourly data", unit="group", colour="green"):
+            fname = self._prepare_group_request(group, self.config.ZIP_DIR, coords, vars_, monthly)
             if fname:
                 zip_fp = os.path.join(self.config.ZIP_DIR, fname)
 
@@ -162,24 +164,26 @@ class DataDownloader:
         group: tuple,
         dir_: str,
         coords: list[float],
-        vars_: list[str]
+        vars_: list[str],
+        monthly: bool
     ) -> str:
         """
         Queries data for a specific date range and location, then downloads the results.
         Group is in the form (year, months, days, hours).
         """
-        Y, months, days, hours = group
+        Y, M, days, hours = group
 
         request = APIRequest(
-            year=str(Y),
-            month=months,   # now a list
-            day=days,       # now a list
-            time=hours,     # now a list
+            year=Y,
+            months=M,        # can be a list
+            days=days,       # now a list
+            times=hours,     # now a list
             coords=coords,
-            vars_=vars_
+            vars_=vars_,
+            monthly=monthly
         )
 
-        return request.query_era5(dir_)
+        return request.query(dir_)
 
     @staticmethod
     def _extract_zip(zip_fp: str, unzip_fp: str) -> None:

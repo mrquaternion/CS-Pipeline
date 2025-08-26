@@ -36,23 +36,18 @@ class CarbonPipeline:
         vrs: list[str],
         regions_to_process: dict[str | int, list[float]],
         processing_type: str,
-        aggregation_type: str,
-        tz_aware: bool
+        aggregation_type: str
     ) -> None:
         """
         Downloads ERA5 datasets for a specified area and time range.
         """
-        if processing_type != "Global" and tz_aware:
-            start_adj, end_adj = self.processor.adjust_timezone_str(coords_to_download, start, end)
-            print(start_adj, end_adj)
-        else:
-            start_adj = pd.to_datetime(start, errors="coerce")
-            end_adj = pd.to_datetime(end, errors="coerce")
-            if pd.isna(start_adj) or pd.isna(end_adj):
-                raise ValueError(f"Invalid dates: start={start}, end={end}")
+        start_adj = pd.to_datetime(start, errors="coerce")
+        end_adj = pd.to_datetime(end, errors="coerce")
+        if pd.isna(start_adj) or pd.isna(end_adj):
+            raise ValueError(f"Invalid dates: start={start}, end={end}")
 
-        groups = self.processor.get_request_groups(start_adj, end_adj)
-        unzip_dirs = await self.downloader.download_groups_async(groups, vrs, coords_to_download, region_id)
+        groups = self.processor.get_request_groups(start_adj, end_adj, aggregation_type == "MONTHLY")
+        unzip_dirs = await self.downloader.download_groups_async(groups, vrs, coords_to_download, aggregation_type == "MONTHLY", region_id)
 
         feature_entry = {
             "region_id": region_id,
@@ -83,7 +78,6 @@ class CarbonPipeline:
         for f in manifest.get("features", []):
             f.pop("processing_type", None)
             f.pop("aggregation_type", None)
-            f.pop("timezone_aware", None)
 
         # Rebuild the object with desired key order:
         features = manifest.get("features", [])
@@ -92,7 +86,6 @@ class CarbonPipeline:
         ordered_manifest = {
             "processing_type": processing_type,
             "aggregation_type": aggregation_type,
-            "timezone_aware": tz_aware,
             "features": features
         }
 
@@ -107,7 +100,7 @@ class CarbonPipeline:
         preds: list[str],
         start: str,
         end: str,
-        rect_regions: list[list[float]],
+        rect_regions: dict[str | int, list[float]],
         output_name: str,
         processing_type: str,
         aggregation_type: str
@@ -136,10 +129,17 @@ class CarbonPipeline:
 
         if processing_type == "BoundingBox":
             merged_ds = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
-            index = ['region_id', 'latitude', 'longitude', 'valid_time']
         else:
-            index = ['valid_time', 'latitude', 'longitude']
+            merged_df = merged_ds.to_dataframe().reset_index()
+            merged_df["region_id"] = merged_df
+            merged_df = (
+                merged_df
+                .set_index(["region_id", "latitude", "longitude", "valid_time"])
+                .sort_index()
+            )
+            merged_ds = merged_df.to_xarray()
 
+        index = ['region_id', 'latitude', 'longitude', 'valid_time']
         tmp_dir = self.dataset_manager.write_chunks(merged_ds, preds, index, processing_type)
         self.dataset_manager.concat_chunks(tmp_dir, output_name)
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -200,10 +200,6 @@ class CarbonPipeline:
             print("No missing data found in the specified time range. Nothing to do.")
             return None
 
-        first_lat = merged_ds.latitude.values[0]
-        first_lon = merged_ds.longitude.values[0]
-        dftz = self.processor.adjust_timezone_df(df, [first_lat, first_lon])
-
         # Handle CO2 data (similar to area processing)
         ds_co2 = self.dataset_manager.load_and_clean_co2_dataset()
         if ds_co2 is not None:
@@ -217,7 +213,7 @@ class CarbonPipeline:
             merged_ds = self.dataset_manager.add_wtd_column(merged_ds, ds_wtd)
                 
         dfm = self.dataset_manager.apply_column_rename(merged_ds).to_dataframe()
-        dfr = self.dataset_manager.build_multiindex_dataframe(dftz, preds)
+        dfr = self.dataset_manager.build_multiindex_dataframe(df, preds)
         
         for pred in preds:
             if pred in dfr.columns.get_level_values('variable'):

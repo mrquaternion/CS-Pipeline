@@ -6,7 +6,6 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
-from timezonefinder import TimezoneFinder
 from tqdm import tqdm
 import xarray as xr
 import rioxarray as rxr
@@ -22,7 +21,6 @@ class DatasetManager:
     
     def __init__(self, config: CarbonPipelineConfig):
         self.config = config
-        self.tz_finder = TimezoneFinder()
 
     def merge_unzipped(self, dirs: list[str]) -> Union[xr.Dataset, None]:
         paths = [p for d in dirs for p in glob.glob(os.path.join(d, "*.nc"))]
@@ -176,14 +174,14 @@ class DatasetManager:
         
         return xr.concat(datasets, dim="time") if datasets else None
 
-    def filter_coordinates(self, ds: xr.Dataset, regions: list[list[float]]):
+    def filter_coordinates(self, ds: xr.Dataset, regions: dict[str | int, list[float]]):
         ds_copy = ds.copy()
 
         ds_lats = ds_copy.coords["latitude"].values
         ds_lons = ds_copy.coords["longitude"].values
 
         all_regions_to_retain = []
-        for region_id, (lat_max, lon_min, lat_min, lon_max) in enumerate(regions):
+        for region_id, (lat_max, lon_min, lat_min, lon_max) in regions.items():
             lat_max_era5 = self._nearest_point(lat_max, ds_lats)
             lon_max_era5 = self._nearest_point(lon_max, ds_lons)
             lat_min_era5 = self._nearest_point(lat_min, ds_lats, prev=lat_max_era5)
@@ -277,13 +275,6 @@ class DatasetManager:
     def write_chunks(self, ds: xr.Dataset, preds: list[str], index: list, processing_type) -> str:
         """
         Write dataset in chunks.
-
-        ⚠️ Note:
-        For non-"Global" processing, the `valid_time` conversion from UTC → local
-        timezone currently applies a **manual hotfix**:
-            - This is a temporary adjustment to realign the data to midnight local
-              time, but it is hiding a real offset issue that needs proper handling.
-              Depending on the timezone and region, this might not always be correct.
         """
         tmp_dir = "./outputs_tmp"
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -292,20 +283,6 @@ class DatasetManager:
         # Process in larger time chunks for efficiency
         for i in tqdm(range(ds.sizes[index[0]]), desc="Processing and writing chunks"):
             chunk_ds = ds.isel({index[0]: slice(i, i + 1)})
-            # Re-set to the appropriate timezone
-            lat = float(chunk_ds["latitude"].values[0])
-            print(chunk_ds.to_dataframe())
-            print(f"Latitude of the region first point: {lat}")
-            lon = float(chunk_ds["longitude"].values[0])
-            tz_name = self.tz_finder.timezone_at(lat=lat, lng=lon)
-            if processing_type != "Global":
-                t_local = (pd.DatetimeIndex(chunk_ds["valid_time"].values)
-                               .tz_localize(tz_name)
-                               .tz_convert("UTC")
-                               #- pd.Timedelta(hours=1)  # the hotfix
-                           ).tz_localize(None)
-
-                chunk_ds = chunk_ds.assign_coords(valid_time=("valid_time", t_local))
 
             chunk_df = chunk_ds.to_dataframe()
             
