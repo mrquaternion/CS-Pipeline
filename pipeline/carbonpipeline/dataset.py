@@ -39,36 +39,55 @@ class DatasetManager:
         # Rename CO2 indexes so it matches ERA5 indexes
         ds_co2_renamed = ds_co2.rename({"time": "valid_time", "lat": "latitude", "lon": "longitude"})
 
-        # Add column year_month to both dataset
+        # Add column year_month to both datasets
         ds_co2_renamed = self._add_year_month(ds_co2_renamed, "valid_time")
         ds_era5_renamed = self._add_year_month(ds_era5, "valid_time")
-     
-        ds_co2_monthly = ds_co2_renamed.groupby('year_month').mean(dim='valid_time')
-        
-        # Cut for dates for which we only queried through ERA5
+
+        # Group CO2 monthly
+        ds_co2_monthly = ds_co2_renamed.groupby("year_month").mean(dim="valid_time")
+
+        # Periods requested by ERA5
         unique_months_era5 = np.unique(ds_era5_renamed.year_month.values)
+
+        # Check available CO2 period
+        min_co2 = ds_co2_monthly.year_month.values.min()
+        max_co2 = ds_co2_monthly.year_month.values.max()
+
+        if unique_months_era5.min() < min_co2 or unique_months_era5.max() > max_co2:
+            print(
+                f"[WARNING] CO2 data available only between {str(min_co2)} and {str(max_co2)}. "
+                f"You requested {str(unique_months_era5.min())} → {str(unique_months_era5.max())}. "
+                "Filling xco2 with NaN."
+            )
+            # Add an NaN-filled xco2 variable to ds_era5 so pipeline won’t break
+            ds_era5["xco2"] = (
+                ("valid_time", "latitude", "longitude"),
+                np.full((ds_era5.sizes["valid_time"], ds_era5.sizes["latitude"], ds_era5.sizes["longitude"]), np.nan)
+            )
+            return ds_era5
+
+        # Safe selection
         ds_co2_monthly_cut = ds_co2_monthly.sel(year_month=unique_months_era5)
-        ds_co2_sortby = ds_co2_monthly_cut.sortby(['latitude', 'longitude'], ascending=[False, False])
 
-        """print(ds_co2_sortby.to_dataframe())"""
+        # Sort for consistency
+        ds_co2_sortby = ds_co2_monthly_cut.sortby(["latitude", "longitude"], ascending=[False, False])
 
+        # Reajust ERA5 coordinates to match CO2 grid
         ds_era5_coord_reajusted = self._assign_closest_lat_lon(ds_era5, ds_co2_monthly_cut, "latitude", "longitude")
-        ds_era5_sortby = ds_era5_coord_reajusted.sortby(['lat', 'lon'], ascending=[False, False])
+        ds_era5_sortby = ds_era5_coord_reajusted.sortby(["lat", "lon"], ascending=[False, False])
 
-        """print(ds_era5_sortby.to_dataframe())"""
-
-        ##### EVERYTHING IS GOOD FROM HERE
-
+        # Select CO2 values
         co2_selected = ds_co2_sortby["xco2"].sel(
             year_month=ds_era5_sortby["year_month"],
             latitude=ds_era5_sortby["lat"],
             longitude=ds_era5_sortby["lon"]
         )
 
+        # Add CO2 column into ERA5 dataset
         ds_era5_sortby["xco2"] = (("valid_time", "latitude", "longitude"), co2_selected.data)
 
         return ds_era5_sortby
-        
+
     def add_wtd_column(self, ds_era5: xr.Dataset, ds_wtd: xr.Dataset) -> xr.Dataset:
         """Add WTD column to ERA5 dataset."""
 
