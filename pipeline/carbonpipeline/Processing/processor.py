@@ -3,7 +3,6 @@ from datetime import datetime
 import re
 import numpy as np
 import pandas as pd
-from timezonefinder import TimezoneFinder
 
 from .constants import VARIABLES_FOR_PREDICTOR
 from .processing_utils import PROCESSORS
@@ -15,7 +14,6 @@ class DataProcessor:
     
     def __init__(self, config: CarbonPipelineConfig):
         self.config = config
-        self.tz_finder = TimezoneFinder()
     
     def convert_ameriflux_to_era5(self, df: pd.DataFrame, pred: str) -> np.ndarray:
         """
@@ -109,27 +107,6 @@ class DataProcessor:
         miss.loc[:, "day"] = miss["timestamp"].dt.day
         miss.loc[:, "time"] = miss["timestamp"].dt.strftime('%H:%M:%S')
         return miss
-
-    def adjust_timezone_str(self, coords: list[float], *dates):
-        """Adjust requested dates timezone based on coordinates."""
-        result = []
-        tz = self.tz_finder.timezone_at(lat=coords[0], lng=coords[1])
-        for date in dates:
-            dt = pd.to_datetime(date, errors="coerce")
-            if pd.isna(dt):
-                raise ValueError(f"Date invalide : {date}")
-            # Application du fuseau horaire
-            dt = dt.tz_localize("UTC").tz_convert(tz).tz_localize(None)
-            result.append(dt)
-        return result
-
-    def adjust_timezone_df(self, df: pd.DataFrame, coords: list[float]) -> pd.DataFrame:
-        """Adjust DataFrame timezone based on coordinates."""
-        dftz = df.copy()
-        tz = self.tz_finder.timezone_at(lat=coords[0], lng=coords[1])
-        dftz["timestamp"] = dftz["timestamp"].dt.tz_localize("UTC")
-        dftz["timestamp"] = dftz["timestamp"].dt.tz_convert(tz)
-        return dftz
 
     @staticmethod
     def get_missing_groups(df: pd.DataFrame) -> list[tuple]:

@@ -12,7 +12,6 @@ dependencies = [
     "eccodes",
     "ipykernel",
     "netCDF4",
-    "timezonefinder",
     "beautifulsoup4",
     "pyyaml",
     "rioxarray",
