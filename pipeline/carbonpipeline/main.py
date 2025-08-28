@@ -7,8 +7,6 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from fontTools.ttLib.woff2 import bboxFormat
-
 from .argparser import ArgumentParserManager
 from .Geometry.geometry_processor import GeometryProcessor
 from .Geometry.geometry import Geometry, GeometryType
