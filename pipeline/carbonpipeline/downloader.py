@@ -40,14 +40,14 @@ class DataDownloader:
         zip_fp = os.path.join(self.config.ZIP_DIR, f"{CO2_FOLDERNAME}.zip")
         unzip_fp = os.path.join(self.config.UNZIP_DIR, CO2_FOLDERNAME)
         self._extract_zip(zip_fp, unzip_fp)
-        print("\nCO2 data downloaded and extracted.")
+        print("\nCO2 data downloaded and extracted.", flush=True)
 
     async def download_wtd_data(self, start_date: str, end_date: str) -> None:
         """Web scraping for WTD data asynchronously."""
         loop = asyncio.get_running_loop()
-        print("Starting WTD web scraping...")
+        print("Starting WTD web scraping...", flush=True)
         await loop.run_in_executor(None, self._web_scraping_wtd_sync, start_date, end_date)
-        print("WTD data download complete.")
+        print("WTD data download complete.", flush=True)
     
     def _web_scraping_wtd_sync(self, start_date: str, end_date: str) -> None:
         """Synchronous WTD web scraping helper."""
@@ -118,7 +118,7 @@ class DataDownloader:
                     if chunk:
                         f.write(chunk)
         except requests.exceptions.RequestException as e:
-            print(f"Failed to download {url}: {e}")
+            print(f"Failed to download {url}: {e}", flush=True)
 
     async def download_groups_async(
         self,
@@ -191,7 +191,7 @@ class DataDownloader:
         Extracts all files from a ZIP archive to a specified directory.
         """
         if not os.path.exists(zip_fp):
-            print(f"Warning: ZIP file not found {zip_fp}, skipping extraction.")
+            print(f"Warning: ZIP file not found {zip_fp}, skipping extraction.", flush=True)
             return
         os.makedirs(unzip_fp, exist_ok=True)
         with zipfile.ZipFile(zip_fp, "r") as zp:
@@ -199,4 +199,4 @@ class DataDownloader:
                 zp.extractall(unzip_fp)
                 os.remove(zip_fp)
             except zipfile.error as e: 
-                print(f"Failed to extract {zip_fp}: {e}")
+                print(f"Failed to extract {zip_fp}: {e}", flush=True)

@@ -77,9 +77,9 @@ class APIRequest:
         filename = self._filename_logic()
         target = os.path.join(zip_dir, filename)
 
-        print(f"\nStarting download for {filename} -> {target}")
+        print(f"\nStarting download for {filename} -> {target}", flush=True)
         result.download(target)
-        print(f"\nFinished download for {filename}")
+        print(f"\nFinished download for {filename}", flush=True)
 
         return filename
 
@@ -111,9 +111,9 @@ class APIRequest:
         filename = self._filename_logic()
         target = os.path.join(zip_dir, filename)
 
-        print(f"\nStarting download for {filename} -> {target}")
+        print(f"\nStarting download for {filename} -> {target}", flush=True)
         result.download(target)
-        print(f"\nFinished download for {filename}")
+        print(f"\nFinished download for {filename}", flush=True)
 
         return filename
 

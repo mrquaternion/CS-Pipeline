@@ -95,7 +95,7 @@ class CarbonPipeline:
         with open(manifest_path, 'w') as fp:
             json.dump(ordered_manifest, fp, indent=2)
 
-        print(f"Appended new entry to manifest at {manifest_path}")
+        print(f"Appended new entry to manifest at {manifest_path}", flush=True)
 
     def run_area_process(
         self,
@@ -109,7 +109,7 @@ class CarbonPipeline:
         aggregation_type: str
     ) -> None:
         """Process area data from manifest."""
-        print(f"For {output_name}:")
+        print(f"For {output_name}:", flush=True)
         merged_ds = self.dataset_manager.apply_column_rename(merged_ds)
         #print("ERA5:")
         #print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())
@@ -117,18 +117,14 @@ class CarbonPipeline:
         # Handle CO2 data
         ds_co2 = self.dataset_manager.load_and_clean_co2_dataset()
         if ds_co2 is not None:
-            print("➕ Adding CO2 column...")
+            print("➕ Adding CO2 column...", flush=True)
             merged_ds = self.dataset_manager.add_co2_column(merged_ds, ds_co2)
-            #print("After CO2 addition:")
-            #print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())
 
         # Handle WTD data
         ds_wtd = self.dataset_manager.load_and_clean_wtd_dataset(start, end)
         if ds_wtd is not None:
-            print("➕ Adding WTD column...")
+            print("➕ Adding WTD column...", flush=True)
             merged_ds = self.dataset_manager.add_wtd_column(merged_ds, ds_wtd)
-            #print("After WTD addition:")
-            #print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())
 
         if processing_type == "BoundingBox":
             all_dss = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
@@ -152,17 +148,6 @@ class CarbonPipeline:
         # Aggregation --> not available for global option because too much data --> not optimized with chunk loading
         resample_methods = {"DAILY": "1D", "MONTHLY": "1ME"}
         if aggregation_type in resample_methods.keys():
-            while True:
-                user_input = input("\nDo you want to delete the original files after aggregation? (Y/n): ").strip()
-                if user_input.upper() == "Y":
-                    delete_source = True
-                    break
-                elif user_input.lower() == "n":
-                    delete_source = False
-                    break
-                else:
-                    print("Invalid input: please enter 'Y' to delete them, or 'n' to keep them.")
-
             for rid, ds in region_dsets.items():
                 variables = list(ds.data_vars.keys())
                 filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
@@ -181,17 +166,17 @@ class CarbonPipeline:
                 if aggregation_type == "MONTHLY":
                     agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
 
-                print(f"✅ Aggregation done for region {rid}")
-                print(agg_ds.to_dataframe())
+                print(f"✅ Aggregation done for region {rid}", flush=True)
+                print(agg_ds.to_dataframe(), flush=True)
 
                 save_path = self.write_aggregated_ds(
                     agg_ds=agg_ds,
                     output_name=f"{output_name}_{rid}",
                     aggregation_type=aggregation_type,
-                    delete_source=delete_source
+                    delete_source=False
                 )
                 agg_ds.to_dataframe().to_csv(f"{output_name}_{rid}.csv")
-                print(f"✅ Aggregation saved to {save_path}")
+                print(f"✅ Aggregation saved to {save_path}", flush=True)
 
     def run_point_process(
         self,
@@ -207,19 +192,19 @@ class CarbonPipeline:
         """
         df = self.processor.load_and_filter_dataframe(data_fp, start, end)
         if df.empty:
-            print("No missing data found in the specified time range. Nothing to do.")
+            print("No missing data found in the specified time range. Nothing to do.", flush=True)
             return None
 
         # Handle CO2 data (similar to area processing)
         ds_co2 = self.dataset_manager.load_and_clean_co2_dataset()
         if ds_co2 is not None:
-            print("Adding CO2 column...")
+            print("Adding CO2 column...", flush=True)
             merged_ds = self.dataset_manager.add_co2_column(merged_ds, ds_co2)
 
         # Handle WTD data (similar to area processing)
         ds_wtd = self.dataset_manager.load_and_clean_wtd_dataset(start, end)
         if ds_wtd is not None:
-            print("Adding WTD column...")
+            print("Adding WTD column...", flush=True)
             merged_ds = self.dataset_manager.add_wtd_column(merged_ds, ds_wtd)
                 
         dfm = self.dataset_manager.apply_column_rename(merged_ds).to_dataframe()
@@ -270,7 +255,7 @@ class CarbonPipeline:
 
         # Overwrite if exists
         if path.exists():
-            print(f"⚠️ Overwriting existing aggregated file: {path}")
+            print(f"⚠️ Overwriting existing aggregated file: {path}", flush=True)
             path.unlink()
 
         if "valid_time" in agg_ds.coords:

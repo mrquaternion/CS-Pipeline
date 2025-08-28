@@ -34,12 +34,12 @@ class SpecialPredictors:
         tasks = []
 
         if self.requires_co2_data:
-            print("⬇️ Downloading CO2 data...")
+            print("⬇️ Downloading CO2 data...", flush=True)
             tasks.append(asyncio.create_task(
                 pipeline.downloader.download_co2_data()
             ))
         if self.requires_wtd_data:
-            print("⬇️ Download WTD data...")
+            print("⬇️ Download WTD data...", flush=True)
             tasks.append(asyncio.create_task(
                 pipeline.downloader.download_wtd_data(start, end)
             ))
@@ -258,48 +258,20 @@ class CommandExecutor:
             else:
                 self.all_geometries = self._parse_geojsons()
 
-                number_of_polygons = len(self.all_geometries)
                 for _, geometry in self.all_geometries.items():
                     geometry.rect_region = GeometryProcessor.process_geometry(geometry)
 
-                total_requests_polygons = number_of_polygons * self.number_requests_per_region
                 total_requests_box = self.number_requests_per_region
+                print(f"\nTotal number of requests: {total_requests_box}\n")
 
-                print("\n--------------------------------------------")
-                print("You have two options for ERA5 extraction:\n")
-                print("1) Merge all polygons into a single global covering region (Y)")
-                print("   - Output: one single NetCDF file (smaller storage footprint).")
-                print(f"   - Fewer requests to ERA5 (only {total_requests_box} requests).")
-                print("   - Faster to download, less risk of exceeding your CDS requests quota.")
-                print("   - Downside: for large polygons, precision is reduced because only")
-                print("     the bounding box corners are kept.")
-                print()
-                print("2) Keep polygons separately (n)")
-                print("   - Output: one NetCDF file per polygon (may take more storage space).")
-                print("   - More precise: all ERA5 data points inside the polygon are retained, no need")
-                print("     for post-interpolation if you need exact coverage (this is of course for large polygons).")
-                print(f"   - Downside: More requests ({total_requests_polygons} requests), so downloads will take longer")
-                print("     and you may need to clear requests on CDS.")
-                print("--------------------------------------------")
+                geometry = Geometry()
+                geometry.rect_region = self._find_covering_regions(list(self.all_geometries.values()))
+                self.bounding_boxes_geometry[geometry] = {
+                    id_geo: geo.rect_region
+                    for id_geo, geo in self.all_geometries.items()
+                }
+                self.processing_type = ProcessingType.BOX
 
-                while True:
-                    user_input = input(
-                        "\nDo you want to merge all polygons into a single bounding-box region? (Y/n): ").strip()
-
-                    if user_input.upper() == "Y":
-                        geometry = Geometry()
-                        geometry.rect_region = self._find_covering_regions(list(self.all_geometries.values()))
-                        self.bounding_boxes_geometry[geometry] = {
-                            id_geo: geo.rect_region
-                            for id_geo, geo in self.all_geometries.items()
-                        }
-                        self.processing_type = ProcessingType.BOX  # let know the pipeline to download in the manifest
-                        break
-                    elif user_input.lower() == "n":
-                        self.processing_type = ProcessingType.POLYGONS
-                        break
-                    else:
-                        print("Invalid input: please enter 'Y' for merged bounding box, or 'n' for polygons.")
 
     @staticmethod
     def _parse_datetime(value):
@@ -412,7 +384,7 @@ class CommandExecutor:
 
     async def _download_for_region(self, geometry, region, region_id, regions_to_process: dict[str | int, list[float]]):
         """Download ERA5 data for a single region. Runs sequentially to avoid CDS conflicts."""
-        print(f"⬇️ Downloading ERA5 data for {region_id}...")
+        print(f"⬇️ Downloading ERA5 data for {region_id}...", flush=True)
         await self.pipeline.run_download(
             coords_to_download=region,
             region_id=region_id,
@@ -449,9 +421,9 @@ def run():
     try:
         asyncio.run(main())
     except (ValueError, FileNotFoundError) as e:
-        print(f"An error occurred: {e}")
+        print(f"An error occurred: {e}", flush=True)
     except KeyboardInterrupt:
-        print("\nProcess interrupted by user.")
+        print("\nProcess interrupted by user.", flush=True)
 
 
 if __name__ == "__main__":

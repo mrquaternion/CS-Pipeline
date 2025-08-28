@@ -79,8 +79,6 @@ class DatasetManager:
         ds_wtd_monthly = ds_wtd_renamed.groupby('year_month').mean(dim='valid_time')
         ds_wtd_sortby = ds_wtd_monthly.sortby(['latitude', 'longitude'], ascending=[False, False])
 
-        """print(ds_era5.isel(valid_time=slice(0, 5)).to_dataframe())"""
-
         ds_wtd_coord_reajusted = self._assign_closest_lat_lon(ds_wtd_sortby, ds_era5, "lat", "lon")
 
         # Reconstructing the good index
@@ -89,8 +87,6 @@ class DatasetManager:
             'latitude': 'lat',
             'longitude': 'lon'
         })
-
-        """print(ds_wtd_coord_reajusted.to_dataframe())"""
 
         # Manipulate the index
         df = ds_wtd_coord_reajusted.to_dataframe().reset_index()
@@ -106,10 +102,6 @@ class DatasetManager:
         )
 
         ds_era5["wtd"] = (("valid_time", "latitude", "longitude"), wtd_selected.data)
-
-        """print(ds_era5.isel(valid_time=slice(0, 5)).to_dataframe())"""
-        """print(np.isnan(ds_era5["xco2"].values).all())"""
-        """print(np.isnan(ds_era5["wtd"].values).all())"""
 
         return ds_era5.drop(["year_month", "lat", "lon"])
 
@@ -302,7 +294,7 @@ class DatasetManager:
         for d in tmp_dirs:
             paths = sorted(glob.glob(os.path.join(d, "*.nc")))
             if not paths:
-                print(f"No chunks found in {d}, skipping.")
+                print(f"No chunks found in {d}, skipping.", flush=True)
                 continue
 
             dsets = [xr.open_dataset(p, engine="netcdf4") for p in paths]
@@ -318,4 +310,4 @@ class DatasetManager:
         out_dir = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
         (df.to_xarray()
            .to_netcdf(out_dir, format="NETCDF4", engine="netcdf4"))
-        print(f"Output saved to {out_name}.{format}")
+        print(f"Output saved to {out_name}.{format}", flush=True)

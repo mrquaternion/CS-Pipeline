@@ -39,7 +39,7 @@ class ArgumentParserManager:
     
     @staticmethod
     def pretty_print_inputs(title: str, **fields):
-        print(f"\n------------------- {title.upper()} -------------------")
+        print(f"\n------------------- {title.upper()} -------------------", flush=True)
         for k, v in fields.items():
-            print(f"- {k:<15}: {v}")
-        print("----------------------------------------------------------\n")
+            print(f"- {k:<15}: {v}", flush=True)
+        print("----------------------------------------------------------\n", flush=True)
