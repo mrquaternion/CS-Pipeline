@@ -29,8 +29,8 @@ class ArgumentParserManager:
         p.add_argument("--config", required=True, type=str, help="The configuration file containing the arguments.")
     
     @staticmethod
-    def load_yaml_config(pathStr: str) -> dict:
-        path = Path(pathStr)
+    def load_yaml_config(pathstr: str) -> dict:
+        path = Path(pathstr)
         with open(path, "r") as f:
             if path.suffix == ".yaml" or path.suffix == ".yml":
                 return yaml.safe_load(f)
@@ -42,4 +42,4 @@ class ArgumentParserManager:
         print(f"\n------------------- {title.upper()} -------------------")
         for k, v in fields.items():
             print(f"- {k:<15}: {v}")
-        print("--------------------------------------------------\n")
+        print("----------------------------------------------------------\n")

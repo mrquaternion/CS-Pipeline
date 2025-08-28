@@ -67,7 +67,7 @@ class CommandExecutor:
         self.aggregation_type = config_dict.get("aggregation-type")
         self.id_field = config_dict.get("id-field")
 
-        self.geometries_per_file: list[dict[str | int, Geometry]] = []
+        self.all_geometries: dict[str | int, Geometry] = {}
         self.bounding_boxes_geometry: dict[Geometry, dict[str | int, list[float]]] = {}
         self.special_preds: SpecialPredictors | None = None # SpecialPredictors object
         self.vars: list[str] | None = None # List of variables to download from ERA5
@@ -149,12 +149,11 @@ class CommandExecutor:
                 region_id = CommandExecutor._generate_region_id(region, geometry_idx)
                 await self._download_for_region(geometry, region, region_id, self.bounding_boxes_geometry[geometry])
         else:
-            for geometries_dict in self.geometries_per_file:
-                for geometry_idx, geometry_geojson_idx in enumerate(geometries_dict):
-                    geometry = geometries_dict[geometry_geojson_idx]
-                    region = geometry.rect_region
-                    region_id = CommandExecutor._generate_region_id(region, geometry_idx)
-                    await self._download_for_region(geometry, region, region_id, {geometry_geojson_idx: region})
+            for geometry_idx, gid in enumerate(self.all_geometries):
+                geometry = self.all_geometries[gid]
+                region = geometry.rect_region
+                region_id = CommandExecutor._generate_region_id(region, geometry_idx)
+                await self._download_for_region(geometry, region, region_id, {gid: region})
 
     def _processing_step(self):
         """
@@ -216,6 +215,18 @@ class CommandExecutor:
             # Make a list out of the predictors
             current_preds = list(self.preds or [])
 
+            # If the requested date are out of bounds for the CO2 dataset
+            co2_start_date = 2002
+            co2_end_date = 2023
+            if "CO2" in current_preds:
+                start = self._parse_datetime(self.start)
+                end = self._parse_datetime(self.end)
+
+                if start.year < co2_start_date or end.year > co2_end_date:
+                    print("Removing the CO2 predictors from the list because it is out of bounds for"
+                          f"the requested start and end date (before {co2_start_date} or after {co2_end_date}).", flush=True)
+                    current_preds.remove("CO2")
+
             # Check if any is not supported
             invalid = [p for p in current_preds if p not in VARIABLES_FOR_PREDICTOR]
             if invalid:
@@ -241,26 +252,24 @@ class CommandExecutor:
                 global_earth_bounding_box = [90, -180, -90, 180]
                 geometry = Geometry()
                 geometry.rect_region = global_earth_bounding_box
-                self.geometries_per_file = [{1: geometry}]
+                self.all_geometries = [{1: geometry}]
                 self.processing_type = ProcessingType.GLOBAL
             # If directory with GeoJSONS is given
             else:
-                self.geometries_per_file = self._parse_geojsons()
-                number_of_polygons = 0
-                for geometries_dict in self.geometries_per_file:
-                    for _, geometry in geometries_dict.items():
-                        geometry.rect_region = GeometryProcessor.process_geometry(geometry)
-                        number_of_polygons += 1
-                total_requests_polygons = number_of_polygons * self.number_requests_per_region
+                self.all_geometries = self._parse_geojsons()
 
-                number_of_regions = len(self.geometries_per_file)
-                total_requests_boxes = number_of_regions * self.number_requests_per_region
+                number_of_polygons = len(self.all_geometries)
+                for _, geometry in self.all_geometries.items():
+                    geometry.rect_region = GeometryProcessor.process_geometry(geometry)
+
+                total_requests_polygons = number_of_polygons * self.number_requests_per_region
+                total_requests_box = self.number_requests_per_region
 
                 print("\n--------------------------------------------")
                 print("You have two options for ERA5 extraction:\n")
                 print("1) Merge all polygons into a single global covering region (Y)")
                 print("   - Output: one single NetCDF file (smaller storage footprint).")
-                print(f"   - Fewer requests to ERA5 (only {total_requests_boxes} requests).")
+                print(f"   - Fewer requests to ERA5 (only {total_requests_box} requests).")
                 print("   - Faster to download, less risk of exceeding your CDS requests quota.")
                 print("   - Downside: for large polygons, precision is reduced because only")
                 print("     the bounding box corners are kept.")
@@ -278,15 +287,13 @@ class CommandExecutor:
                         "\nDo you want to merge all polygons into a single bounding-box region? (Y/n): ").strip()
 
                     if user_input.upper() == "Y":
-                        for geometries_dict in self.geometries_per_file:
-                            geometry = Geometry()
-                            geometries_objs = list(geometries_dict.values())
-                            geometry.rect_region = self._find_covering_regions(geometries_objs)
-                            self.bounding_boxes_geometry[geometry] = { # len() will be the number of GeoJSON files
-                                id_geo: geo.rect_region
-                                for id_geo, geo in geometries_dict.items()
-                            }
-                            self.processing_type = ProcessingType.BOX  # let know the pipeline to download in the manifest
+                        geometry = Geometry()
+                        geometry.rect_region = self._find_covering_regions(list(self.all_geometries.values()))
+                        self.bounding_boxes_geometry[geometry] = {
+                            id_geo: geo.rect_region
+                            for id_geo, geo in self.all_geometries.items()
+                        }
+                        self.processing_type = ProcessingType.BOX  # let know the pipeline to download in the manifest
                         break
                     elif user_input.lower() == "n":
                         self.processing_type = ProcessingType.POLYGONS
@@ -346,29 +353,28 @@ class CommandExecutor:
 
         return True
 
-    def _parse_geojsons(self) -> list:
+    def _parse_geojsons(self) -> dict:
         """
         Parse the coordinate input provided by the user.
         """
         path = Path(self.coords_dir)
 
         # If the provided path is a directory
-        geometries_per_file: list = []
+        geometries_per_file: dict[str | int, Geometry] = {}
         if path.is_dir():
             missing_counter = 1
             for file_path in sorted(path.iterdir()):
                 # Only consider files with recognised extensions
                 if file_path.suffix not in (".geojson", ".json"):
                     continue
-                geometries: list = []
                 with open(file_path, "r") as f:
                     json_dict = json.load(f)
                     if not json_dict.get("features"):
                         raise ValueError(f"No features found in GeoJSON file: {file_path}")
                     features = json_dict["features"]
 
-                    geometries_dict: dict[str | int, Geometry]= {}
                     for feature in features:
+                        # Assigning an ID to the region
                         props = feature.get("properties", {})
                         if self.id_field in props:
                             id_geo = props[self.id_field]
@@ -379,10 +385,8 @@ class CommandExecutor:
                         coordinates = feature["geometry"]["coordinates"]
                         geometry = Geometry(data=coordinates)
                         geometry.validate_coordinates()
-                        geometries_dict[id_geo] = geometry
-                        geometries.append(geometry)
+                        geometries_per_file[id_geo] = geometry
 
-                    geometries_per_file.append(geometries_dict)
             if not geometries_per_file:
                 raise ValueError(f"No valid GeoJSON files found in directory: {path}")
         return geometries_per_file

@@ -1,12 +1,15 @@
 # carbonpipeline/core.py
 import json
 import os
+import glob
 from pathlib import Path
 import shutil
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+import dask
+dask.config.set({"array.slicing.split_large_chunks": True})
 
 from .Geometry.geometry import Geometry
 from .config import CarbonPipelineConfig
@@ -128,27 +131,29 @@ class CarbonPipeline:
             #print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())
 
         if processing_type == "BoundingBox":
-            merged_ds = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
+            all_dss = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
         else:
             merged_df = merged_ds.to_dataframe().reset_index()
-            merged_df["region_id"] = merged_df
+            merged_df["region_id"] = list(rect_regions.keys())[0]
             merged_df = (
                 merged_df
                 .set_index(["region_id", "latitude", "longitude", "valid_time"])
                 .sort_index()
             )
-            merged_ds = merged_df.to_xarray()
+            all_dss = [merged_df.to_xarray()]
 
+        # Conversion to AMF predictors and intelligent chunk writing
         index = ['region_id', 'latitude', 'longitude', 'valid_time']
-        tmp_dir = self.dataset_manager.write_chunks(merged_ds, preds, index, processing_type)
-        self.dataset_manager.concat_chunks(tmp_dir, output_name)
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        tmp_dirs = self.dataset_manager.write_chunks(all_dss, preds, index)
+
+        # Reopen the chunks for each region and create the NetCDF files
+        region_dsets = self.dataset_manager.concat_chunks(tmp_dirs)
 
         # Aggregation --> not available for global option because too much data --> not optimized with chunk loading
         resample_methods = {"DAILY": "1D", "MONTHLY": "1ME"}
         if aggregation_type in resample_methods.keys():
             while True:
-                user_input = input("\nDo you want to delete the original file after aggregation? (Y/n): ").strip()
+                user_input = input("\nDo you want to delete the original files after aggregation? (Y/n): ").strip()
                 if user_input.upper() == "Y":
                     delete_source = True
                     break
@@ -158,30 +163,35 @@ class CarbonPipeline:
                 else:
                     print("Invalid input: please enter 'Y' to delete them, or 'n' to keep them.")
 
-            ds = self.open_nc(output_name)
+            for rid, ds in region_dsets.items():
+                variables = list(ds.data_vars.keys())
+                filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
 
-            variables = list(ds.data_vars.keys())
-            filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
-            agg_ds = xr.Dataset({
-                name: getattr(
-                    ds[pred].resample(valid_time=resample_methods[aggregation_type]),
-                    func
-                )()
-                for pred, agg_types in filtered_agg_schema.items()
-                for agg_dict in [agg_types.get(aggregation_type.lower(), {})]
-                if agg_dict != "DROP"
-                for name, func in agg_dict.items()
-            })
-            if aggregation_type == "MONTHLY":
-                agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
+                agg_ds = xr.Dataset({
+                    name: getattr(
+                        ds[pred].resample(valid_time=resample_methods[aggregation_type]),
+                        func
+                    )()
+                    for pred, agg_types in filtered_agg_schema.items()
+                    for agg_dict in [agg_types.get(aggregation_type.lower(), {})]
+                    if agg_dict != "DROP"
+                    for name, func in agg_dict.items()
+                })
 
-            save_path = self.write_aggregated_ds(
-                agg_ds=agg_ds,
-                output_name=output_name,
-                aggregation_type=aggregation_type,
-                delete_source=delete_source
-            )
-            print(f"✅ Aggregation saved to {save_path}")
+                if aggregation_type == "MONTHLY":
+                    agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
+
+                print(f"✅ Aggregation done for region {rid}")
+                print(agg_ds.to_dataframe())
+
+                save_path = self.write_aggregated_ds(
+                    agg_ds=agg_ds,
+                    output_name=f"{output_name}_{rid}",
+                    aggregation_type=aggregation_type,
+                    delete_source=delete_source
+                )
+                agg_ds.to_dataframe().to_csv(f"{output_name}_{rid}.csv")
+                print(f"✅ Aggregation saved to {save_path}")
 
     def run_point_process(
         self,
@@ -232,11 +242,21 @@ class CarbonPipeline:
             content = json.load(fp)
         return content
 
-    def open_nc(self, output_name: str) -> xr.Dataset:
-        fname = f"{output_name}.nc"
-        path = Path(self.config.OUTPUT_PROCESSED_DIR) / fname
-        ds = xr.open_dataset(path, decode_times=True).load()
-        return ds
+    def open_nc_all(self, output_name: str) -> dict[str, xr.Dataset]:
+        """
+        Open all NetCDF files for the given output_name (one per region).
+        Returns a dict {region_id: Dataset}.
+        """
+        pattern = str(Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}_*.nc")
+        files = sorted(glob.glob(pattern))
+        if not files:
+            raise FileNotFoundError(f"No files found for {output_name} in {self.config.OUTPUT_PROCESSED_DIR}")
+
+        dsets = {}
+        for f in files:
+            region_id = Path(f).stem.split("_")[-1]  # ex: output_name_region_1 -> "1"
+            dsets[region_id] = xr.open_dataset(f, decode_times=True).load()
+        return dsets
 
     def write_aggregated_ds(
         self,

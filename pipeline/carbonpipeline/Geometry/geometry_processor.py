@@ -108,7 +108,7 @@ class GeometryProcessor:
         return [N, W, S, E]
 
     @staticmethod
-    def _ensure_min_bbox_size(region: List[float], min_delta: float = 0.25) -> List[float]:
+    def _ensure_min_bbox_size(region: List[float], min_delta: float = 0.251) -> List[float]:
         """
         Ensure that a bounding box [N, W, S, E] has at least `min_delta`
         degrees difference in both latitude and longitude.
@@ -154,6 +154,7 @@ class GeometryProcessor:
         E = max(lons)
 
         region = [N, W, S, E]
+
         return GeometryProcessor._ensure_min_bbox_size(region)
 
     @staticmethod

@@ -7,5 +7,4 @@ start: null             # do not touch
 end: null               # do not touch
 preds: []               # do not touch
 aggregation-type: null  # do not touch
-timezone-aware:         # do not touch
 id-field:               # do not touch

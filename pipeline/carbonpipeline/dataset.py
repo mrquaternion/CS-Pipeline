@@ -39,51 +39,26 @@ class DatasetManager:
         # Rename CO2 indexes so it matches ERA5 indexes
         ds_co2_renamed = ds_co2.rename({"time": "valid_time", "lat": "latitude", "lon": "longitude"})
 
-        # Add column year_month to both datasets
+        # Add column year_month to both dataset
         ds_co2_renamed = self._add_year_month(ds_co2_renamed, "valid_time")
         ds_era5_renamed = self._add_year_month(ds_era5, "valid_time")
 
-        # Group CO2 monthly
-        ds_co2_monthly = ds_co2_renamed.groupby("year_month").mean(dim="valid_time")
+        ds_co2_monthly = ds_co2_renamed.groupby('year_month').mean(dim='valid_time')
 
-        # Periods requested by ERA5
+        # Cut for dates for which we only queried through ERA5
         unique_months_era5 = np.unique(ds_era5_renamed.year_month.values)
-
-        # Check available CO2 period
-        min_co2 = ds_co2_monthly.year_month.values.min()
-        max_co2 = ds_co2_monthly.year_month.values.max()
-
-        if unique_months_era5.min() < min_co2 or unique_months_era5.max() > max_co2:
-            print(
-                f"[WARNING] CO2 data available only between {str(min_co2)} and {str(max_co2)}. "
-                f"You requested {str(unique_months_era5.min())} → {str(unique_months_era5.max())}. "
-                "Filling xco2 with NaN."
-            )
-            # Add an NaN-filled xco2 variable to ds_era5 so pipeline won’t break
-            ds_era5["xco2"] = (
-                ("valid_time", "latitude", "longitude"),
-                np.full((ds_era5.sizes["valid_time"], ds_era5.sizes["latitude"], ds_era5.sizes["longitude"]), np.nan)
-            )
-            return ds_era5
-
-        # Safe selection
         ds_co2_monthly_cut = ds_co2_monthly.sel(year_month=unique_months_era5)
+        ds_co2_sortby = ds_co2_monthly_cut.sortby(['latitude', 'longitude'], ascending=[False, False])
 
-        # Sort for consistency
-        ds_co2_sortby = ds_co2_monthly_cut.sortby(["latitude", "longitude"], ascending=[False, False])
-
-        # Reajust ERA5 coordinates to match CO2 grid
         ds_era5_coord_reajusted = self._assign_closest_lat_lon(ds_era5, ds_co2_monthly_cut, "latitude", "longitude")
-        ds_era5_sortby = ds_era5_coord_reajusted.sortby(["lat", "lon"], ascending=[False, False])
+        ds_era5_sortby = ds_era5_coord_reajusted.sortby(['lat', 'lon'], ascending=[False, False])
 
-        # Select CO2 values
         co2_selected = ds_co2_sortby["xco2"].sel(
             year_month=ds_era5_sortby["year_month"],
             latitude=ds_era5_sortby["lat"],
             longitude=ds_era5_sortby["lon"]
         )
 
-        # Add CO2 column into ERA5 dataset
         ds_era5_sortby["xco2"] = (("valid_time", "latitude", "longitude"), co2_selected.data)
 
         return ds_era5_sortby
@@ -193,7 +168,7 @@ class DatasetManager:
         
         return xr.concat(datasets, dim="time") if datasets else None
 
-    def filter_coordinates(self, ds: xr.Dataset, regions: dict[str | int, list[float]]):
+    def filter_coordinates(self, ds: xr.Dataset, regions: dict[str | int, list[float]]) -> list[xr.Dataset]:
         ds_copy = ds.copy()
 
         ds_lats = ds_copy.coords["latitude"].values
@@ -207,10 +182,10 @@ class DatasetManager:
             lon_min_era5 = self._nearest_point(lon_min, ds_lons, prev=lon_max_era5)
 
             # 2. Sélectionner les données avec les coordonnées ERA5
-            lats = [lat_max_era5, lat_min_era5]
-            lons = [lon_max_era5, lon_min_era5]
-            rows_to_retain_for_corner = ds_copy.sel(latitude=lats,
-                                                    longitude=lons)
+            lats = list({lat_max_era5, lat_min_era5})
+            lons = list({lon_max_era5, lon_min_era5})
+            rows_to_retain_for_corner = ds_copy.sel(latitude=lats, longitude=lons)
+
             corresponding_df: pd.DataFrame = (
                 rows_to_retain_for_corner
                 .to_dataframe()
@@ -244,13 +219,14 @@ class DatasetManager:
             corresponding_ds = corresponding_df.to_xarray()
             all_regions_to_retain.append(corresponding_ds)
 
-        return xr.concat(all_regions_to_retain, dim="region_id",
-                         join="override")  # pd.concat(all_regions_to_retain, axis=0)
+        return all_regions_to_retain
 
     @staticmethod
     def _nearest_point(point: float | int, ds_points: np.ndarray, prev=None):
         if prev is not None:
-            ds_points = ds_points[ds_points != prev]  # exclude prev safely
+            filtered = ds_points[ds_points != prev]
+            if filtered.size > 0:
+                ds_points = filtered
         return ds_points[np.argmin(np.abs(ds_points - point))]
 
     def _match_to_closest(self, values, reference_points):
@@ -291,49 +267,51 @@ class DatasetManager:
         renamed_df.columns = pd.MultiIndex.from_tuples(tuples, names=["variable", "source"])
         return renamed_df.sort_index(axis=1, level="variable")
 
-    def write_chunks(self, ds: xr.Dataset, preds: list[str], index: list, processing_type) -> str:
+    def write_chunks(self, all_dss: list[xr.Dataset], preds: list[str], index: list) -> list[str]:
         """
         Write dataset in chunks.
         """
-        tmp_dir = "./outputs_tmp"
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_parent_dir = "./outputs_tmp"
+        tmp_dirs = []
+        shutil.rmtree(tmp_parent_dir, ignore_errors=True)
+        os.makedirs(tmp_parent_dir, exist_ok=True)
         processor = DataProcessor(self.config)
+
         # Process in larger time chunks for efficiency
-        for i in tqdm(range(ds.sizes[index[0]]), desc="Processing and writing chunks"):
-            chunk_ds = ds.isel({index[0]: slice(i, i + 1)})
+        for ds in all_dss:
+            rid = f"region_{ds.coords['region_id'].values[0]}"
+            tmp_dir = os.path.join(tmp_parent_dir, rid)
+            os.makedirs(tmp_dir, exist_ok=True)
 
-            chunk_df = chunk_ds.to_dataframe()
-            
-            # Ensure index is consistent
-            chunk_df = chunk_df.reset_index().set_index(index)
+            df = ds.to_dataframe().reset_index().set_index(index)
+            lookup = {p: processor.convert_ameriflux_to_era5(df, p) for p in preds}
 
-            lookup = {p: processor.convert_ameriflux_to_era5(chunk_df, p) for p in preds}
-            
-            (pd.DataFrame(lookup, index=chunk_df.index)
-               .to_xarray()
-               .to_netcdf(os.path.join(tmp_dir, f"CHUNK_{i}.nc"), mode="w",
-                          format="NETCDF4", engine="netcdf4"))
+            path = os.path.join(tmp_dir, f"{rid}.nc")
+            (pd.DataFrame(lookup, index=df.index)
+             .to_xarray()
+             .to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
+             )
+
+            tmp_dirs.append(tmp_dir)
         
-        return tmp_dir
+        return tmp_dirs
 
-    def concat_chunks(self, tmp_dir: str, out_name: str) -> None:
-        paths = sorted(glob.glob(os.path.join(tmp_dir, "*.nc")))
-        if not paths:
-            print("No chunks found to concatenate.")
-            return
+    @staticmethod
+    def concat_chunks(tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
+        region_dsets = {}
+        for d in tmp_dirs:
+            paths = sorted(glob.glob(os.path.join(d, "*.nc")))
+            if not paths:
+                print(f"No chunks found in {d}, skipping.")
+                continue
 
-        out_fp = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
+            dsets = [xr.open_dataset(p, engine="netcdf4") for p in paths]
+            ds = xr.combine_by_coords(dsets, combine_attrs="override").load()
 
-        # W/o dask: open each file and combine
-        dsets = [xr.open_dataset(p, engine="netcdf4") for p in paths]
-        ds = xr.combine_by_coords(dsets, combine_attrs="override")
+            region_id = os.path.basename(d)
+            region_dsets[region_id] = ds
 
-        # Compresser et définir des chunks de stockage NetCDF
-        encoding = {v: {"zlib": True, "complevel": 4} for v in ds.data_vars}
-
-        ds.to_netcdf(out_fp, mode="w", format="NETCDF4", engine="netcdf4", encoding=encoding)
-        print(f"Final dataset saved to {out_fp}\n")
+        return region_dsets
 
     def save_output(self, df: pd.DataFrame, out_name: str) -> None:
         """Save output in specified format."""

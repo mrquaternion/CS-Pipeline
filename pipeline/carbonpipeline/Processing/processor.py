@@ -147,7 +147,7 @@ class DataProcessor:
             months = pd.period_range(start=start, end=end, freq="M")
             for month in months:
                 month_start, month_end = month.start_time, month.end_time
-                if start <= month_start and end >= month_end:
+                if start <= month_start <= end:
                     from calendar import monthrange
                     n_days = monthrange(month.year, month.month)[1]
                     days = [f"{d:02d}" for d in range(1, n_days + 1)]

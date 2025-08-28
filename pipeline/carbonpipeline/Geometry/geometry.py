@@ -68,7 +68,8 @@ class Geometry:
         else:
             return type(lst).__name__
 
-    def _infer_geom_type(self, depth):
+    @staticmethod
+    def _infer_geom_type(depth):
         if depth == 1:
             return GeometryType.POINT
         elif depth == 2:
