@@ -259,6 +259,8 @@ class DatasetManager:
         with tqdm(total=total, unit="region", mininterval=0.1, file=sys.stdout) as pbar:
             def update_progress(future):
                 pbar.update(1)
+                pbar.refresh()
+                sys.stdout.flush()
 
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
