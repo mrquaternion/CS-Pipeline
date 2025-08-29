@@ -1,7 +1,9 @@
 # carbonpipeline/dataset.py
+import gc
 import glob
 import os
 import shutil
+from pathlib import Path
 from typing import Union
 
 import numpy as np
@@ -9,6 +11,7 @@ import pandas as pd
 from tqdm import tqdm
 import xarray as xr
 import rioxarray as rxr
+from typing import Iterable, Iterator
 
 from .api_request import CO2_FOLDERNAME
 from .Processing.constants import SHORTNAME_TO_FULLNAME
@@ -160,7 +163,7 @@ class DatasetManager:
         
         return xr.concat(datasets, dim="time") if datasets else None
 
-    def filter_coordinates(self, ds: xr.Dataset, regions: dict[str | int, list[float]]) -> list[xr.Dataset]:
+    def filter_coordinates(self, ds: xr.Dataset, regions: dict[str | int, list[float]]) -> Iterator[xr.Dataset]:
         ds_copy = ds.copy()
 
         ds_lats = ds_copy.coords["latitude"].values
@@ -174,25 +177,36 @@ class DatasetManager:
             lon_min_era5 = self._nearest_point(lon_min, ds_lons, prev=lon_max_era5)
 
             # 2. Sélectionner les données avec les coordonnées ERA5
-            lats = list({lat_max_era5, lat_min_era5})
-            lons = list({lon_max_era5, lon_min_era5})
-            rows_to_retain_for_corner = ds_copy.sel(latitude=lats, longitude=lons)
+            rows_to_retain_for_corner = ds_copy.sel(
+                latitude=[lat_min_era5, lat_max_era5],
+                longitude=[lon_min_era5, lon_max_era5]
+            )
 
+            """
             corresponding_df: pd.DataFrame = (
                 rows_to_retain_for_corner
                 .to_dataframe()
                 .reset_index()
             )
+            """
 
             # 3. Réassigner les coordonnées avec les vraies valeurs de la région
             # Créer un mapping des coordonnées ERA5 vers les vraies coordonnées
+            """
             coord_mapping = {
                 lat_max_era5: lat_max,
                 lat_min_era5: lat_min,
                 lon_max_era5: lon_max,
                 lon_min_era5: lon_min
             }
+            """
+            reg = rows_to_retain_for_corner.sortby("latitude").sortby("longitude")
+            reg = reg.assign_coords(
+                latitude=[min(lat_min, lat_max), max(lat_min, lat_max)],
+                longitude=[min(lon_min, lon_max), max(lon_min, lon_max)],
+            )
 
+            """
             # Appliquer le mapping
             corresponding_df["latitude"] = corresponding_df["latitude"].map(
                 lambda x: coord_mapping.get(x, x)
@@ -200,6 +214,7 @@ class DatasetManager:
             corresponding_df["longitude"] = corresponding_df["longitude"].map(
                 lambda x: coord_mapping.get(x, x)
             )
+            
 
             corresponding_df["region_id"] = region_id
             corresponding_df = (
@@ -210,8 +225,15 @@ class DatasetManager:
 
             corresponding_ds = corresponding_df.to_xarray()
             all_regions_to_retain.append(corresponding_ds)
+            """
 
-        return all_regions_to_retain
+            reg = reg.expand_dims(region_id=[int(region_id)]).transpose(
+                "region_id", "valid_time", "latitude", "longitude"
+            )
+
+            yield reg
+
+        #return all_regions_to_retain
 
     @staticmethod
     def _nearest_point(point: float | int, ds_points: np.ndarray, prev=None):
@@ -221,12 +243,14 @@ class DatasetManager:
                 ds_points = filtered
         return ds_points[np.argmin(np.abs(ds_points - point))]
 
-    def _match_to_closest(self, values, reference_points):
+    @staticmethod
+    def _match_to_closest(values, reference_points):
         """Match values to closest reference points."""
         reference_points = np.asarray(reference_points)
         return np.array([reference_points[np.abs(reference_points - v).argmin()] for v in values])
 
-    def apply_column_rename(self, ds: xr.Dataset) -> xr.Dataset:
+    @staticmethod
+    def apply_column_rename(ds: xr.Dataset) -> xr.Dataset:
         """Apply column renaming to dataset."""
         rename_dict = {
             k: v 
@@ -259,33 +283,48 @@ class DatasetManager:
         renamed_df.columns = pd.MultiIndex.from_tuples(tuples, names=["variable", "source"])
         return renamed_df.sort_index(axis=1, level="variable")
 
-    def write_chunks(self, all_dss: list[xr.Dataset], preds: list[str], index: list) -> list[str]:
+    def write_chunks(
+        self,
+        dsets: Iterable[xr.Dataset],
+        preds: list[str],
+        index: list,
+        total: int
+    ) -> list[str]:
         """
         Write dataset in chunks.
         """
         tmp_parent_dir = "./outputs_tmp"
-        tmp_dirs = []
         shutil.rmtree(tmp_parent_dir, ignore_errors=True)
         os.makedirs(tmp_parent_dir, exist_ok=True)
+
         processor = DataProcessor(self.config)
+        tmp_dirs: list[str] = []
 
         # Process in larger time chunks for efficiency
-        for ds in all_dss:
-            rid = f"region_{ds.coords['region_id'].values[0]}"
+        for ds_small in tqdm(dsets, total=total, unit="region"):
+            rid = f"region_{ds_small.coords['region_id'].values[0]}"
             tmp_dir = os.path.join(tmp_parent_dir, rid)
             os.makedirs(tmp_dir, exist_ok=True)
 
-            df = ds.to_dataframe().reset_index().set_index(index)
+            df = (
+                ds_small
+                .to_dataframe()
+                .reset_index()
+                .set_index(index)
+            )
+
+            # Conversion
             lookup = {p: processor.convert_ameriflux_to_era5(df, p) for p in preds}
 
+            out_ds = pd.DataFrame(lookup, index=df.index).to_xarray()
             path = os.path.join(tmp_dir, f"{rid}.nc")
-            (pd.DataFrame(lookup, index=df.index)
-             .to_xarray()
-             .to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
-             )
+            out_ds.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
 
             tmp_dirs.append(tmp_dir)
-        
+
+            del df, out_ds
+            gc.collect()
+
         return tmp_dirs
 
     @staticmethod

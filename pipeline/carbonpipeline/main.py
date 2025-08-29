@@ -227,8 +227,8 @@ class CommandExecutor:
                 end = self._parse_datetime(self.end)
 
                 if start.year < co2_start_date or end.year > co2_end_date:
-                    print("Removing the CO2 predictors from the list because it is out of bounds for"
-                          f"the requested start and end date (before {co2_start_date} or after {co2_end_date}).", flush=True)
+                    print("Removing the CO2 predictor from the list because it is out of bounds for"
+                          f" the requested start and end date (before {co2_start_date} or after {co2_end_date}).", flush=True)
                     current_preds.remove("CO2")
 
             # Check if any is not supported

@@ -125,23 +125,15 @@ class CarbonPipeline:
             print("➕ Adding WTD column...", flush=True)
             merged_ds = self.dataset_manager.add_wtd_column(merged_ds, ds_wtd)
 
+        # Filter the dataset for the regions
         if processing_type == "BoundingBox":
             print("📐 Filtering dataset by bounding boxes...", flush=True)
             all_dss = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
-        else:
-            merged_df = merged_ds.to_dataframe().reset_index()
-            merged_df["region_id"] = list(rect_regions.keys())[0]
-            merged_df = (
-                merged_df
-                .set_index(["region_id", "latitude", "longitude", "valid_time"])
-                .sort_index()
-            )
-            all_dss = [merged_df.to_xarray()]
 
         # Conversion to AMF predictors and intelligent chunk writing
         index = ['region_id', 'latitude', 'longitude', 'valid_time']
         print("✍️ Writing dataset chunks...", flush=True)
-        tmp_dirs = self.dataset_manager.write_chunks(all_dss, preds, index)
+        tmp_dirs = self.dataset_manager.write_chunks(all_dss, preds, index, len(rect_regions))
 
         # Reopen the chunks for each region and create the NetCDF files
         region_dsets = self.dataset_manager.concat_chunks(tmp_dirs)
@@ -169,7 +161,6 @@ class CarbonPipeline:
                     agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
 
                 print(f"✅ Aggregation done for region {rid}", flush=True)
-                print(agg_ds.to_dataframe(), flush=True)
 
                 save_path = self.write_aggregated_ds(
                     agg_ds=agg_ds,
