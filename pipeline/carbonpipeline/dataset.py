@@ -4,6 +4,7 @@ import glob
 import os
 import shutil
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Union
 
@@ -183,50 +184,13 @@ class DatasetManager:
                 longitude=[lon_min_era5, lon_max_era5]
             )
 
-            """
-            corresponding_df: pd.DataFrame = (
-                rows_to_retain_for_corner
-                .to_dataframe()
-                .reset_index()
-            )
-            """
-
             # 3. Réassigner les coordonnées avec les vraies valeurs de la région
             # Créer un mapping des coordonnées ERA5 vers les vraies coordonnées
-            """
-            coord_mapping = {
-                lat_max_era5: lat_max,
-                lat_min_era5: lat_min,
-                lon_max_era5: lon_max,
-                lon_min_era5: lon_min
-            }
-            """
             reg = rows_to_retain_for_corner.sortby("latitude").sortby("longitude")
             reg = reg.assign_coords(
                 latitude=[min(lat_min, lat_max), max(lat_min, lat_max)],
                 longitude=[min(lon_min, lon_max), max(lon_min, lon_max)],
             )
-
-            """
-            # Appliquer le mapping
-            corresponding_df["latitude"] = corresponding_df["latitude"].map(
-                lambda x: coord_mapping.get(x, x)
-            )
-            corresponding_df["longitude"] = corresponding_df["longitude"].map(
-                lambda x: coord_mapping.get(x, x)
-            )
-            
-
-            corresponding_df["region_id"] = region_id
-            corresponding_df = (
-                corresponding_df
-                .set_index(["region_id", "latitude", "longitude", "valid_time"])
-                .sort_index()
-            )
-
-            corresponding_ds = corresponding_df.to_xarray()
-            all_regions_to_retain.append(corresponding_ds)
-            """
 
             reg = reg.expand_dims(region_id=[int(region_id)]).transpose(
                 "region_id", "valid_time", "latitude", "longitude"
@@ -284,49 +248,56 @@ class DatasetManager:
         renamed_df.columns = pd.MultiIndex.from_tuples(tuples, names=["variable", "source"])
         return renamed_df.sort_index(axis=1, level="variable")
 
-    def write_chunks(
-        self,
-        dsets: Iterable[xr.Dataset],
-        preds: list[str],
-        index: list,
-        total: int
-    ) -> list[str]:
-        """
-        Write dataset in chunks.
-        """
+    def write_chunks(self, dsets: Iterable[xr.Dataset], preds: list[str], index: list, total: int) -> list[str]:
         tmp_parent_dir = "./outputs_tmp"
         shutil.rmtree(tmp_parent_dir, ignore_errors=True)
         os.makedirs(tmp_parent_dir, exist_ok=True)
 
-        processor = DataProcessor(self.config)
         tmp_dirs: list[str] = []
+        max_workers = 8
 
-        # Process in larger time chunks for efficiency
-        for ds_small in tqdm(dsets, total=total, unit="region", mininterval=2.0, file=sys.stdout, disable=False):
-            rid = f"region_{ds_small.coords['region_id'].values[0]}"
-            tmp_dir = os.path.join(tmp_parent_dir, rid)
-            os.makedirs(tmp_dir, exist_ok=True)
+        with tqdm(total=total, unit="region", mininterval=0.1, file=sys.stdout) as pbar:
+            def update_progress(future):
+                pbar.update(1)
 
-            df = (
-                ds_small
-                .to_dataframe()
-                .reset_index()
-                .set_index(index)
-            )
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                for ds_small in dsets:
+                    future = executor.submit(self._process_and_write, ds_small, preds, index, self.config,
+                                             tmp_parent_dir)
+                    future.add_done_callback(update_progress)
+                    futures.append(future)
 
-            # Conversion
-            lookup = {p: processor.convert_ameriflux_to_era5(df, p) for p in preds}
-
-            out_ds = pd.DataFrame(lookup, index=df.index).to_xarray()
-            path = os.path.join(tmp_dir, f"{rid}.nc")
-            out_ds.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
-
-            tmp_dirs.append(tmp_dir)
-
-            del df, out_ds
-            gc.collect()
+                for future in futures:
+                    tmp_dirs.append(future.result())
 
         return tmp_dirs
+
+    @staticmethod
+    def _process_and_write(ds_small, preds, index, config, tmp_parent_dir):
+        processor = DataProcessor(config)
+
+        rid = f"region_{ds_small.coords['region_id'].values[0]}"
+        tmp_dir = os.path.join(tmp_parent_dir, rid)
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        df = (
+            ds_small
+            .to_dataframe()
+            .reset_index()
+            .set_index(index)
+        )
+
+        lookup = {p: processor.convert_ameriflux_to_era5(df, p) for p in preds}
+        out_ds = pd.DataFrame(lookup, index=df.index).to_xarray()
+
+        path = os.path.join(tmp_dir, f"{rid}.nc")
+        out_ds.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
+
+        del df, out_ds
+        gc.collect()
+
+        return tmp_dir
 
     @staticmethod
     def concat_chunks(tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
