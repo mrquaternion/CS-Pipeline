@@ -3,6 +3,7 @@ import gc
 import glob
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Union
 
@@ -301,7 +302,7 @@ class DatasetManager:
         tmp_dirs: list[str] = []
 
         # Process in larger time chunks for efficiency
-        for ds_small in tqdm(dsets, total=total, unit="region"):
+        for ds_small in tqdm(dsets, total=total, unit="region", mininterval=2.0, file=sys.stdout, disable=False):
             rid = f"region_{ds_small.coords['region_id'].values[0]}"
             tmp_dir = os.path.join(tmp_parent_dir, rid)
             os.makedirs(tmp_dir, exist_ok=True)
