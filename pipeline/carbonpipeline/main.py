@@ -157,11 +157,16 @@ class CommandExecutor:
         """
         Logic for the processing step.
         """
+        print("🚀 Starting processing step...", flush=True)
         content = self.pipeline.load_features_from_manifest()
         processing_type = content["processing_type"]
         aggregation_type = content["aggregation_type"]
         features = content["features"]
+
+        print(f"📦 Loaded manifest with {len(features)} features", flush=True)
+
         for i in range(len(features)):
+            print(f"\n▶️ Processing feature {i}/{len(features)}", flush=True)
             region_id = features[i]["region_id"]
             preds = features[i]["preds"]
             start = features[i]["start_date"]
@@ -184,6 +189,7 @@ class CommandExecutor:
                         self.pipeline.run_area_process(ds, preds, start, end, rect_regions,
                                                        output_name, processing_type, aggregation_type)
                 case _:
+                    print("🌍 Running area process...", flush=True)
                     self.pipeline.run_area_process(ds, preds, start, end, rect_regions,
                                                    output_name, processing_type, aggregation_type)
 

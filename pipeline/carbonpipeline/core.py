@@ -109,10 +109,9 @@ class CarbonPipeline:
         aggregation_type: str
     ) -> None:
         """Process area data from manifest."""
-        print(f"For {output_name}:", flush=True)
+        print(f"\n🔧 Starting area process for {output_name}", flush=True)
         merged_ds = self.dataset_manager.apply_column_rename(merged_ds)
-        #print("ERA5:")
-        #print(merged_ds.isel(valid_time=slice(0, 5)).to_dataframe())
+        print("✅ Columns renamed", flush=True)
 
         # Handle CO2 data
         ds_co2 = self.dataset_manager.load_and_clean_co2_dataset()
@@ -127,6 +126,7 @@ class CarbonPipeline:
             merged_ds = self.dataset_manager.add_wtd_column(merged_ds, ds_wtd)
 
         if processing_type == "BoundingBox":
+            print("📐 Filtering dataset by bounding boxes...", flush=True)
             all_dss = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
         else:
             merged_df = merged_ds.to_dataframe().reset_index()
@@ -140,6 +140,7 @@ class CarbonPipeline:
 
         # Conversion to AMF predictors and intelligent chunk writing
         index = ['region_id', 'latitude', 'longitude', 'valid_time']
+        print("✍️ Writing dataset chunks...", flush=True)
         tmp_dirs = self.dataset_manager.write_chunks(all_dss, preds, index)
 
         # Reopen the chunks for each region and create the NetCDF files
@@ -148,6 +149,7 @@ class CarbonPipeline:
         # Aggregation --> not available for global option because too much data --> not optimized with chunk loading
         resample_methods = {"DAILY": "1D", "MONTHLY": "1ME"}
         if aggregation_type in resample_methods.keys():
+            print(f"📊 Performing {aggregation_type} aggregation...", flush=True)
             for rid, ds in region_dsets.items():
                 variables = list(ds.data_vars.keys())
                 filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
