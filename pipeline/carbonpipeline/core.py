@@ -133,10 +133,12 @@ class CarbonPipeline:
         # Conversion to AMF predictors and intelligent chunk writing
         index = ['region_id', 'latitude', 'longitude', 'valid_time']
         print("✍️ Writing dataset chunks...", flush=True)
-        tmp_dirs = self.dataset_manager.write_chunks(all_dss, preds, index, len(rect_regions))
+        tmp_files = self.dataset_manager.write_chunks(
+            all_dss, preds, index, len(rect_regions)
+        )
 
         # Reopen the chunks for each region and create the NetCDF files
-        region_dsets = self.dataset_manager.concat_chunks(tmp_dirs)
+        region_dsets = self.dataset_manager.concat_chunks(tmp_files)
 
         # Aggregation --> not available for global option because too much data --> not optimized with chunk loading
         resample_methods = {"DAILY": "1D", "MONTHLY": "1ME"}

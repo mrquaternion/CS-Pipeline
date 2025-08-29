@@ -289,24 +289,28 @@ class DatasetManager:
         dsets: Iterable[xr.Dataset],
         preds: list[str],
         index: list,
-        total: int
+        total: int,
+        regions_per_file: int = 50,
     ) -> list[str]:
         """
-        Write dataset in chunks.
+        Write multiple regions per NetCDF file to limit I/O overhead.
         """
         tmp_parent_dir = "./outputs_tmp"
         shutil.rmtree(tmp_parent_dir, ignore_errors=True)
         os.makedirs(tmp_parent_dir, exist_ok=True)
 
         processor = DataProcessor(self.config)
-        tmp_dirs: list[str] = []
+        tmp_files: list[str] = []
+        batch: list[xr.Dataset] = []
 
-        # Process in larger time chunks for efficiency
-        for ds_small in tqdm(dsets, total=total, unit="region", mininterval=2.0, file=sys.stdout, disable=False):
-            rid = f"region_{ds_small.coords['region_id'].values[0]}"
-            tmp_dir = os.path.join(tmp_parent_dir, rid)
-            os.makedirs(tmp_dir, exist_ok=True)
-
+        for ds_small in tqdm(
+            dsets,
+            total=total,
+            unit="region",
+            mininterval=2.0,
+            file=sys.stdout,
+            disable=False,
+        ):
             df = (
                 ds_small
                 .to_dataframe()
@@ -314,34 +318,47 @@ class DatasetManager:
                 .set_index(index)
             )
 
-            # Conversion
             lookup = {p: processor.convert_ameriflux_to_era5(df, p) for p in preds}
-
             out_ds = pd.DataFrame(lookup, index=df.index).to_xarray()
-            path = os.path.join(tmp_dir, f"{rid}.nc")
-            out_ds.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
-
-            tmp_dirs.append(tmp_dir)
+            batch.append(out_ds)
 
             del df, out_ds
             gc.collect()
 
-        return tmp_dirs
+            if len(batch) >= regions_per_file:
+                combined = xr.concat(batch, dim="region_id")
+                file_idx = len(tmp_files)
+                path = os.path.join(tmp_parent_dir, f"batch_{file_idx}.nc")
+                combined.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
+                tmp_files.append(path)
+                batch.clear()
+                del combined
+                gc.collect()
+
+        if batch:
+            combined = xr.concat(batch, dim="region_id")
+            file_idx = len(tmp_files)
+            path = os.path.join(tmp_parent_dir, f"batch_{file_idx}.nc")
+            combined.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
+            tmp_files.append(path)
+            batch.clear()
+            del combined
+            gc.collect()
+
+        return tmp_files
 
     @staticmethod
-    def concat_chunks(tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
-        region_dsets = {}
-        for d in tmp_dirs:
-            paths = sorted(glob.glob(os.path.join(d, "*.nc")))
-            if not paths:
-                print(f"No chunks found in {d}, skipping.", flush=True)
+    def concat_chunks(tmp_files: list[str]) -> dict[str, xr.Dataset]:
+        region_dsets: dict[str, xr.Dataset] = {}
+        for path in tmp_files:
+            if not os.path.exists(path):
+                print(f"No chunks found in {path}, skipping.", flush=True)
                 continue
 
-            dsets = [xr.open_dataset(p, engine="netcdf4") for p in paths]
-            ds = xr.combine_by_coords(dsets, combine_attrs="override").load()
-
-            region_id = os.path.basename(d)
-            region_dsets[region_id] = ds
+            ds = xr.open_dataset(path, engine="netcdf4")
+            for rid in ds.coords["region_id"].values:
+                region_key = f"region_{int(rid)}"
+                region_dsets[region_key] = ds.sel(region_id=rid).load()
 
         return region_dsets
 
