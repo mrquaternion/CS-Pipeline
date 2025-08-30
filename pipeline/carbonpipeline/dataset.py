@@ -318,7 +318,7 @@ class DatasetManager:
 
     def concat_chunks(self, tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
         region_dsets = {}
-        max_workers = 8
+        max_workers = 16 if os.cpu_count() >= 16 else os.cpu_count()
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(self._load_region, d): d for d in tmp_dirs}
             for future in tqdm(as_completed(futures), total=len(futures), unit="region", mininterval=0.1, file=sys.stdout):
@@ -327,6 +327,85 @@ class DatasetManager:
                     region_id, ds = result
                     region_dsets[region_id] = ds
         return region_dsets
+
+    def parallel_aggregation(self, region_dsets, aggregation_type, output_name, AGG_SCHEMA, resample_methods):
+        results = {}
+        max_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or os.cpu_count()
+        tasks = [(rid, ds, aggregation_type, output_name, AGG_SCHEMA, resample_methods) for rid, ds in region_dsets.items()]
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(self._aggregate_and_save, task) for task in tasks]
+            for f in tqdm(as_completed(futures), total=len(futures), unit="region"):
+                rid, save_path = f.result()
+                results[rid] = save_path
+        return results
+
+    def _aggregate_and_save(self, args):
+        rid, ds, aggregation_type, output_name, AGG_SCHEMA, resample_methods = args
+        variables = list(ds.data_vars.keys())
+        filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
+
+        agg_ds = xr.Dataset({
+            name: getattr(
+                ds[pred].resample(valid_time=resample_methods[aggregation_type]),
+                func
+            )()
+            for pred, agg_types in filtered_agg_schema.items()
+            for agg_dict in [agg_types.get(aggregation_type.lower(), {})]
+            if agg_dict != "DROP"
+            for name, func in agg_dict.items()
+        })
+
+        if aggregation_type == "MONTHLY":
+            agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
+
+        # save dataset
+        save_path = self._write_aggregated_ds(
+            agg_ds=agg_ds,
+            output_name=f"{output_name}_{rid}",
+            aggregation_type=aggregation_type,
+            delete_source=False,
+        )
+        return rid, save_path
+
+    def _write_aggregated_ds(
+        self,
+        agg_ds: xr.Dataset,
+        output_name: str,
+        aggregation_type: str,
+        delete_source: bool,
+    ) -> Path:
+        path = Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}_{aggregation_type.lower()}.nc"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Overwrite if exists
+        if path.exists():
+            print(f"⚠️ Overwriting existing aggregated file: {path}", flush=True)
+            path.unlink()
+
+        if "valid_time" in agg_ds.coords:
+            agg_ds = agg_ds.assign_coords(
+                valid_time=("valid_time", np.array(agg_ds["valid_time"].values, dtype="datetime64[ns]"))
+            )
+
+        encoding = {}
+        for v in agg_ds.data_vars:
+            enc = {"zlib": True, "complevel": 4}
+            # If float64 isn't required, store as float32 to cut size in half
+            if str(agg_ds[v].dtype).startswith("float64"):
+                enc["dtype"] = np.float32
+            encoding[v] = enc
+
+        agg_ds.to_netcdf(path, encoding=encoding, engine="netcdf4")
+
+        if delete_source:
+            src = Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}.nc"
+            try:
+                src.unlink()
+            except FileNotFoundError:
+                pass
+
+        return path
 
     def save_output(self, df: pd.DataFrame, out_name: str) -> None:
         """Save output in specified format."""

@@ -2,6 +2,7 @@
 import json
 import os
 import glob
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 import shutil
 
@@ -142,34 +143,14 @@ class CarbonPipeline:
         resample_methods = {"DAILY": "1D", "MONTHLY": "1ME"}
         if aggregation_type in resample_methods.keys():
             print(f"📊 Performing {aggregation_type} aggregation...", flush=True)
-            for rid, ds in region_dsets.items():
-                variables = list(ds.data_vars.keys())
-                filtered_agg_schema = {key: AGG_SCHEMA[key] for key in variables if key in AGG_SCHEMA}
-
-                agg_ds = xr.Dataset({
-                    name: getattr(
-                        ds[pred].resample(valid_time=resample_methods[aggregation_type]),
-                        func
-                    )()
-                    for pred, agg_types in filtered_agg_schema.items()
-                    for agg_dict in [agg_types.get(aggregation_type.lower(), {})]
-                    if agg_dict != "DROP"
-                    for name, func in agg_dict.items()
-                })
-
-                if aggregation_type == "MONTHLY":
-                    agg_ds["valid_time"] = agg_ds["valid_time"].to_index().to_period("M")
-
-                print(f"✅ Aggregation done for region {rid}", flush=True)
-
-                save_path = self.write_aggregated_ds(
-                    agg_ds=agg_ds,
-                    output_name=f"{output_name}_{rid}",
-                    aggregation_type=aggregation_type,
-                    delete_source=False
-                )
-
-                print(f"✅ Aggregation saved to {save_path}", flush=True)
+            save_paths = self.dataset_manager.parallel_aggregation(
+                region_dsets,
+                aggregation_type,
+                output_name,
+                AGG_SCHEMA,
+                resample_methods
+            )
+            print(f"✅ Aggregation done for {len(save_paths)} regions", flush=True)
 
     def run_point_process(
         self,
@@ -235,45 +216,6 @@ class CarbonPipeline:
             region_id = Path(f).stem.split("_")[-1]  # ex: output_name_region_1 -> "1"
             dsets[region_id] = xr.open_dataset(f, decode_times=True).load()
         return dsets
-
-    def write_aggregated_ds(
-        self,
-        agg_ds: xr.Dataset,
-        output_name: str,
-        aggregation_type: str,
-        delete_source: bool,
-    ) -> Path:
-        path = Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}_{aggregation_type.lower()}.nc"
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Overwrite if exists
-        if path.exists():
-            print(f"⚠️ Overwriting existing aggregated file: {path}", flush=True)
-            path.unlink()
-
-        if "valid_time" in agg_ds.coords:
-            agg_ds = agg_ds.assign_coords(
-                valid_time=("valid_time", np.array(agg_ds["valid_time"].values, dtype="datetime64[ns]"))
-            )
-
-        encoding = {}
-        for v in agg_ds.data_vars:
-            enc = {"zlib": True, "complevel": 4}
-            # If float64 isn't required, store as float32 to cut size in half
-            if str(agg_ds[v].dtype).startswith("float64"):
-                enc["dtype"] = np.float32
-            encoding[v] = enc
-
-        agg_ds.to_netcdf(path, encoding=encoding, engine="netcdf4")
-
-        if delete_source:
-            src = Path(self.config.OUTPUT_PROCESSED_DIR) / f"{output_name}.nc"
-            try:
-                src.unlink()
-            except FileNotFoundError:
-                pass
-
-        return path
 
     @staticmethod
     def setup_manifest_and_dirs(manifest, *dirs) -> None:
