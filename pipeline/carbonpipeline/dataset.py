@@ -254,7 +254,7 @@ class DatasetManager:
         os.makedirs(tmp_parent_dir, exist_ok=True)
 
         tmp_dirs: list[str] = []
-        max_workers = 16
+        max_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or os.cpu_count()
 
         with tqdm(total=total, unit="region", mininterval=0.1, file=sys.stdout) as pbar:
             def update_progress(future):
