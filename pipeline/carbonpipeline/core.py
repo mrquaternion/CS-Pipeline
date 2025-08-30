@@ -126,9 +126,8 @@ class CarbonPipeline:
             merged_ds = self.dataset_manager.add_wtd_column(merged_ds, ds_wtd)
 
         # Filter the dataset for the regions
-        if processing_type == "BoundingBox":
-            print("📐 Filtering dataset by bounding boxes...", flush=True)
-            all_dss = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
+        print("📐 Filtering dataset by bounding boxes...", flush=True)
+        all_dss = self.dataset_manager.filter_coordinates(ds=merged_ds, regions=rect_regions)
 
         # Conversion to AMF predictors and intelligent chunk writing
         index = ['region_id', 'latitude', 'longitude', 'valid_time']
@@ -136,6 +135,7 @@ class CarbonPipeline:
         tmp_dirs = self.dataset_manager.write_chunks(all_dss, preds, index, len(rect_regions))
 
         # Reopen the chunks for each region and create the NetCDF files
+        print("💥 Concatenating chunks...", flush=True)
         region_dsets = self.dataset_manager.concat_chunks(tmp_dirs)
 
         # Aggregation --> not available for global option because too much data --> not optimized with chunk loading

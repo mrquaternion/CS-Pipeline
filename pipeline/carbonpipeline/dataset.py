@@ -318,10 +318,11 @@ class DatasetManager:
 
     def concat_chunks(self, tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
         region_dsets = {}
-        max_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or os.cpu_count()
+        max_workers = 8
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = executor.map(self._load_region, tmp_dirs)
-            for result in results:
+            futures = {executor.submit(self._load_region, d): d for d in tmp_dirs}
+            for future in tqdm(as_completed(futures), total=len(futures), unit="region", mininterval=0.1, file=sys.stdout):
+                result = future.result()
                 if result:
                     region_id, ds = result
                     region_dsets[region_id] = ds
