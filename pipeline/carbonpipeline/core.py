@@ -168,7 +168,7 @@ class CarbonPipeline:
                     aggregation_type=aggregation_type,
                     delete_source=False
                 )
-                agg_ds.to_dataframe().to_csv(f"{output_name}_{rid}.csv")
+
                 print(f"✅ Aggregation saved to {save_path}", flush=True)
 
     def run_point_process(

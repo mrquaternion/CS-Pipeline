@@ -4,7 +4,7 @@ import glob
 import os
 import shutil
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor
 from pathlib import Path
 from typing import Union
 
@@ -302,20 +302,29 @@ class DatasetManager:
         return tmp_dir
 
     @staticmethod
-    def concat_chunks(tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
+    def _load_region(tmp_dir: str) -> tuple[str, xr.Dataset]:
+        """Load a single region's dataset"""
+        paths = sorted(glob.glob(os.path.join(tmp_dir, "*.nc")))
+        if not paths:
+            print(f"No chunks found in {tmp_dir}, skipping.", flush=True)
+            return None
+
+        # Utiliser chunks et lazy loading
+        dsets = [xr.open_dataset(p, engine="netcdf4", chunks="auto") for p in paths]
+        ds = xr.combine_by_coords(dsets, combine_attrs="override")
+
+        region_id = os.path.basename(tmp_dir)
+        return region_id, ds.load()  # Load seulement à la fin
+
+    def concat_chunks(self, tmp_dirs: list[str]) -> dict[str, xr.Dataset]:
         region_dsets = {}
-        for d in tmp_dirs:
-            paths = sorted(glob.glob(os.path.join(d, "*.nc")))
-            if not paths:
-                print(f"No chunks found in {d}, skipping.", flush=True)
-                continue
-
-            dsets = [xr.open_dataset(p, engine="netcdf4") for p in paths]
-            ds = xr.combine_by_coords(dsets, combine_attrs="override").load()
-
-            region_id = os.path.basename(d)
-            region_dsets[region_id] = ds
-
+        max_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or os.cpu_count()
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(self._load_region, tmp_dirs)
+            for result in results:
+                if result:
+                    region_id, ds = result
+                    region_dsets[region_id] = ds
         return region_dsets
 
     def save_output(self, df: pd.DataFrame, out_name: str) -> None:
