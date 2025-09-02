@@ -1,9 +1,23 @@
-# CS-Pipeline
+# CS-Pipeline overview
 
-## About
-This package is designed to fill missing values in environmental predictor datasets from EC stations. It works by providing a CSV file and the coordinates of the site. New columns will be created with values coming from ERA5 dataset.
+`CS-Pipeline` is a command‑line workflow that enriches eddy-covariance (EC) station data with reanalysis variables from ERA5, and optionally gap‑fills AmeriFlux predictors. It also helps getting data to feed a neural network (previously used to analyze fires conditions across Canada). It operates in two main stages driven by YAML configuration files. It starts by querying data from the [Copernicus Data Store](https://cds.climate.copernicus.eu).
 
-## Install
+
+
+## Core workflow
+**1. Prepare configuration**
+- Create a YAML file (please use the same structure as in the repo, `download_config.yaml`) describing [the date range, target predictors, geographic footprint, aggregation level, and an optional field name to label features](#test).
+- When gap-filling a specific station, supply a CSV file _only_ in the `process_config.yaml`.
+
+
+
+
+
+
+
+
+
+
 The `carbonpipeline` package can be installed in the following way:
 1. Clone the repository on your computer
 2. Navigate to the root of the project
@@ -33,3 +47,5 @@ Currently, the pipeline only works with the following AMERIFLUX predictors:
 - WTD (may not work for point processing, i.e. `carbonpipeline point ...`)
 - SWC_1, SWC_2, SWC_3, SWC_4, SWC_5 (values may not be currently accurate)
 - TS_1, TS_2, TS_3, TS_4, TS_5 (values may not be currently accurate)
+
+## <a name="test"></a> Configuration options 
