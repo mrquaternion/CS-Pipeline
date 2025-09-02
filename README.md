@@ -43,6 +43,7 @@
 ## Known limitations
 - CSV gap-filling (`data-file` option) is still experimental and lacks full validation in the latest release.
 - v1.0.0 runs non‑interactively, i.e. no prompts or checkpoints during execution.
+- Saving a separate file for each region (polygon) is not always optimal, especially when dealing with more than a thousand regions. Depending on the size of each region, the storage requirements can become very large. For this reason, it is recommended to run the pipeline on **(1) an external hard drive** or **(2) a computing cluster with sufficient storage**.
 
 ## Contributing
 
