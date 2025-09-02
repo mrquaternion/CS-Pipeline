@@ -2,7 +2,9 @@
 
 `CS-Pipeline` is a command‑line workflow that enriches eddy-covariance (EC) station data with reanalysis variables from ERA5, and optionally gap‑fills AmeriFlux predictors. It also helps getting data to feed a neural network (previously used to analyze fires conditions across Canada). It operates in two main stages driven by YAML configuration files. It starts by querying data from the [Copernicus Data Store](https://cds.climate.copernicus.eu).
 
-
+> **Note:** The most recent development is happening on the [`non-interactive`](https://github.com/mrquaternion/CS-Pipeline/tree/non-interactive) branch.  
+> This version removes runtime prompts and focuses on fully automated workflows.  
+> If you’re looking for the latest features and improvements, please check out that branch.
 
 ## Core workflow
 **1. Prepare configuration**
