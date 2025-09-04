@@ -287,10 +287,8 @@ class DatasetManager:
             lookup = {p: processor.convert_ameriflux_to_era5(df, p) for p in preds}
 
             path = os.path.join(tmp_dir, f"{rid}.nc")
-            (pd.DataFrame(lookup, index=df.index)
-             .to_xarray()
-             .to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
-             )
+            ds = pd.DataFrame(lookup, index=df.index).to_xarray()
+            ds.to_netcdf(path, mode="w", format="NETCDF4", engine="netcdf4")
 
             tmp_dirs.append(tmp_dir)
         
@@ -313,9 +311,9 @@ class DatasetManager:
 
         return region_dsets
 
-    def save_output(self, df: pd.DataFrame, out_name: str) -> None:
+    @staticmethod
+    def save_output(df: pd.DataFrame, out_name: str) -> None:
         """Save output in specified format."""
-        out_dir = os.path.join(self.config.OUTPUT_PROCESSED_DIR, f"{out_name}.nc")
-        (df.to_xarray()
-           .to_netcdf(out_dir, format="NETCDF4", engine="netcdf4"))
-        print(f"Output saved to {out_name}.{format}")
+        path = f"{out_name}.csv"
+        df.to_csv(path)
+        print(f"✅ File saved to {path}")

@@ -7,8 +7,6 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from fontTools.ttLib.woff2 import bboxFormat
-
 from .argparser import ArgumentParserManager
 from .Geometry.geometry_processor import GeometryProcessor
 from .Geometry.geometry import Geometry, GeometryType
@@ -51,6 +49,7 @@ class ProcessingType(Enum):
     GLOBAL = "Global"
     POLYGONS = "IndividualPolygons"
     BOX = "BoundingBox"
+    ECSTATION = "ECStation"
 
 
 class CommandExecutor:
@@ -60,6 +59,7 @@ class CommandExecutor:
         self.action = config_dict.get("action")
         self.output_suffix = config_dict.get("output-filename")
         self.data_file = config_dict.get("data-file")
+        self.location = config_dict.get("location")
         self.coords_dir = self.validate_coords_dir(config_dict.get("coords-dir"))
         self.start = config_dict.get("start")
         self.end = config_dict.get("end")
@@ -143,7 +143,15 @@ class CommandExecutor:
             await asyncio.gather(*global_tasks)
 
         # Download ERA5 data sequentially for each region (to avoid CDS conflicts)
-        if self.processing_type == ProcessingType.BOX:
+        if self.processing_type == ProcessingType.ECSTATION:
+            gapfilling = await self._ask_gapfill()
+
+            for geometry_idx, id in enumerate(self.all_geometries):
+                geometry = self.all_geometries[id]
+                region = geometry.rect_region
+                region_id = CommandExecutor._generate_region_id(region, geometry_idx)
+                await self._download_for_stations(geometry, region, region_id, gapfilling)
+        elif self.processing_type == ProcessingType.BOX:
             for geometry_idx, geometry in enumerate(self.bounding_boxes_geometry):
                 region = geometry.rect_region
                 region_id = CommandExecutor._generate_region_id(region, geometry_idx)
@@ -155,22 +163,35 @@ class CommandExecutor:
                 region_id = CommandExecutor._generate_region_id(region, geometry_idx)
                 await self._download_for_region(geometry, region, region_id, {gid: region})
 
+    async def _ask_gapfill(self) -> bool:
+        while True:
+            ans = (await asyncio.to_thread(
+                input, "\nDo you want to gap-fill the dataset in input? (Y/n): "
+            )).strip()
+            if ans.upper() == "Y":
+                return True
+            if ans.lower() == "n":
+                return False
+            print("Invalid input: please enter 'Y' to gap-fill, or 'n' if not.")
+
     def _processing_step(self):
         """
         Logic for the processing step.
         """
         content = self.pipeline.load_features_from_manifest()
-        processing_type = content["processing_type"]
-        aggregation_type = content["aggregation_type"]
-        features = content["features"]
+        processing_type = content.get("processing_type")
+        aggregation_type = content.get("aggregation_type")
+        gapfilling = content.get("gapfilling")
+        features = content.get("features")
         for i in range(len(features)):
-            region_id = features[i]["region_id"]
-            preds = features[i]["preds"]
-            start = features[i]["start_date"]
-            end = features[i]["end_date"]
-            geometry = features[i]["geometry"]
-            rect_regions = features[i]["rect_regions"]
-            unzip_dirs = features[i]["unzip_sub_folders"]
+            region_id = features[i].get("region_id")
+            preds = features[i].get("preds")
+            start = features[i].get("start_date")
+            end = features[i].get("end_date")
+            geometry = features[i].get("geometry")
+            rect_regions = features[i].get("rect_regions")
+            unzip_dirs = features[i].get("unzip_sub_folders")
+            data_file = features[i].get("data_file")
             ds = self.pipeline.dataset_manager.merge_unzipped(unzip_dirs)
 
             if not self.output_suffix:
@@ -179,8 +200,9 @@ class CommandExecutor:
 
             match geometry:
                 case GeometryType.POINT.value:
-                    if self.data_file:
-                        self.pipeline.run_point_process(self.data_file, ds, preds, start, end, output_name)
+                    if gapfilling:
+                        self.pipeline.run_point_process(data_file, ds, preds, start, end,
+                                                        region_id, gapfilling, output_name)
                     else:
                         # fallback if the client doesn't want gap-filling to the given dataset
                         self.pipeline.run_area_process(ds, preds, start, end, rect_regions,
@@ -246,16 +268,43 @@ class CommandExecutor:
             if "wtd" in self.vars:
                 self.vars.remove("wtd") # Same here
 
-            # Obtain the rectangular regions for ERA5
+            # Verify if location was provided and if CO2 and WTD are not available for EC Stations data query
+            if self.data_file:
+                if not self.location:
+                    raise CommandExecutorError("No location has been provided for the EC tower. Please modify the "
+                                               "config file such that [latitude, longitude] is in the location"
+                                               "argument.")
+
+                removed = []
+                for special_pred in ["CO2", "WTD"]:
+                    if special_pred in self.preds:
+                        if special_pred == "CO2":
+                            self.special_preds.requires_co2_data = False
+                        else:  # must be "WTD"
+                            self.special_preds.requires_wtd_data = False
+                        self.preds.remove(special_pred)
+                        removed.append(special_pred)
+
+                if removed:
+                    print(f"The AmeriFlux predictor/s {removed} are not available for point query.")
+                    print("Removing it/them.")
+
+            # If CSV file is given
+            if self.coords_dir is None and self.data_file is not None:
+                geometry = Geometry(data=self.location)
+                geometry.validate_coordinates()
+                geometry.rect_region = GeometryProcessor.process_geometry(geometry)
+                self.all_geometries = {0: geometry}
+                self.processing_type = ProcessingType.ECSTATION
             # Default
-            if self.coords_dir is None:
+            elif self.coords_dir is None and self.data_file is None:
                 global_earth_bounding_box = [90, -180, -90, 180]
                 geometry = Geometry()
                 geometry.rect_region = global_earth_bounding_box
-                self.all_geometries = [{1: geometry}]
+                self.all_geometries = {0: geometry}
                 self.processing_type = ProcessingType.GLOBAL
             # If directory with GeoJSONS is given
-            else:
+            elif self.coords_dir is not None and self.data_file is None:
                 self.all_geometries = self._parse_geojsons()
 
                 number_of_polygons = len(self.all_geometries)
@@ -410,10 +459,25 @@ class CommandExecutor:
             for g in geometries
         ]
 
+    async def _download_for_stations(self, geometry, region, region_id, gapfilling):
+        """Download ERA5 data for a EC station. Runs sequentially to avoid CDS conflicts."""
+        print(f"⬇️ Downloading ERA5 data for {region_id}...")
+        await self.pipeline.run_download_point(
+            coords_to_download=region,
+            region_id=region_id,
+            geometry=geometry,
+            start=self.start,
+            end=self.end,
+            preds=self.preds,
+            vrs=self.vars,
+            gapfilling=gapfilling,
+            data_file=self.data_file
+        )
+
     async def _download_for_region(self, geometry, region, region_id, regions_to_process: dict[str | int, list[float]]):
         """Download ERA5 data for a single region. Runs sequentially to avoid CDS conflicts."""
         print(f"⬇️ Downloading ERA5 data for {region_id}...")
-        await self.pipeline.run_download(
+        await self.pipeline.run_download_area(
             coords_to_download=region,
             region_id=region_id,
             geometry=geometry,
